@@ -11,18 +11,15 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    # 1. سحب كودك الأساسي (wsam.cpp)
     - name: 📥 جلب ملفات المشروع الأساسية
       uses: actions/checkout@v4
 
-    # 2. تجهيز بيئة الايفون (Xcode)
     - name: 🛠️ تجهيز أدوات بناء الايفون (SDK)
       run: |
         echo "جاري تجهيز بيئة حماية محمد الشمري..."
         sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-    # 3. السحر هنا: تحميل ImGui و Dobby و JSON تلقائياً
-    - name: 🌐 تحميل المكتبات الناقصة (ImGui, Dobby, Json, Curl for iOS)
+    - name: 🌐 تحميل المكتبات الناقصة (ImGui, Dobby, Json)
       run: |
         echo "جاري تحميل مكتبة json.hpp..."
         curl -O https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp
@@ -36,14 +33,10 @@ jobs:
         curl -o imgui/imgui_widgets.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui_widgets.cpp
         curl -o imgui/imgui_tables.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui_tables.cpp
         curl -o imgui/imgui_internal.h https://raw.githubusercontent.com/ocornut/imgui/master/imgui_internal.h
-        curl -o imgui/imstb_rectpack.h https://raw.githubusercontent.com/ocornut/imgui/master/imstb_rectpack.h
-        curl -o imgui/imstb_textedit.h https://raw.githubusercontent.com/ocornut/imgui/master/imstb_textedit.h
-        curl -o imgui/imstb_truetype.h https://raw.githubusercontent.com/ocornut/imgui/master/imstb_truetype.h
 
         echo "جاري تحميل وتجهيز مكتبة Dobby..."
         git clone https://github.com/jmpews/Dobby.git dobby_src
         cd dobby_src
-        # بناء Dobby لمعمارية الايفون arm64
         mkdir build && cd build
         cmake .. -DDOBBY_GENERATE_SHARED=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64
         make
@@ -52,39 +45,22 @@ jobs:
         cp dobby_src/include/dobby.h dobby/include/
         cp dobby_src/build/libdobby.a dobby/lib/
         
-        echo "جاري تحميل مكتبة Curl المخصصة لـ iOS..."
-        # نحمل نسخة جاهزة من Curl للايفون (من مستودع موثوق)
-        git clone https://github.com/sinofool/build-libcurl-ios.git curl_ios
-        cd curl_ios
-        ./build.sh
-        cd ..
-        # نقل ملفات الـ Headers والمكتبة الثابتة لمكان واضح
-        mkdir -p curl/include/curl curl/lib
-        cp -r curl_ios/curl-ios-build/include/curl/* curl/include/curl/
-        cp curl_ios/curl-ios-build/lib/libcurl.a curl/lib/
-
-    # 4. (تم حذف خطوة تثبيت brew curl لأننا استخدمنا النسخة المخصصة للايفون فوق)
-
-    # 5. عملية الصهر والدمج
     - name: 🔥 دمج الكود وصناعة الـ Dylib
       run: |
         echo "بدأ عملية الصهر العنيفة..."
         mkdir -p build_output
         
-        # أمر الترجمة للايفون (مع إضافة مسارات Curl الجديدة)
-        xcrun --sdk iphoneos clang++ -arch arm64 -shared \
-        -std=c++17 -O3 -fobjc-arc \
-        -I./imgui -I./dobby/include -I./curl/include -I. \
+        # أمر الترجمة للايفون (بدون Curl واستخدام Objective-C++)
+        xcrun --sdk iphoneos clang++ -x objective-c++ -arch arm64 -shared -std=c++17 -O3 -fobjc-arc \
+        -I./imgui -I./dobby/include -I. \
         wsam.cpp \
         ./imgui/imgui.cpp ./imgui/imgui_draw.cpp ./imgui/imgui_widgets.cpp ./imgui/imgui_tables.cpp \
         -L./dobby/lib -ldobby \
-        -L./curl/lib -lcurl \
         -framework Foundation -framework UIKit -framework Metal -framework QuartzCore \
         -o build_output/WMASTER_Shammari.dylib
         
         echo "✅ تمت عملية الصهر بنجاح! ملف Dylib جاهز."
 
-    # 6. رفع الملف النهائي
     - name: 📤 رفع ملف الـ Dylib الجاهز للتحميل
       uses: actions/upload-artifact@v4
       with:
