@@ -1,1 +1,64 @@
 
+name: 🐲 DRAGON HACK - ULTIMATE BUILDER (iOS)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: 
+
+jobs:
+  build_dragon:
+    name: صهر حماية محمد الشمري (arm64)
+    runs-on: macos-latest
+
+    steps:
+      - name: 📥 جلب الكود المصدري
+        uses: actions/checkout@v4
+
+      - name: 🛠️ تجهيز بيئة العمل (Xcode)
+        run: |
+          echo "جاري تجهيز بيئة الصهر الملكية..."
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: 🌐 تحميل المكاتب الحقيقية (ImGui, Dobby, Json)
+        run: |
+          echo "جاري جلب مكتبة ImGui كاملة (نسخة المكاتب الفخمة)..."
+          mkdir -p imgui
+          for f in imgui.h imgui.cpp imgui_draw.cpp imgui_widgets.cpp imgui_tables.cpp imgui_internal.h imconfig.h imstb_rectpack.h imstb_textedit.h imstb_truetype.h; do
+            curl -L -o imgui/$f https://raw.githubusercontent.com/ocornut/imgui/master/$f
+          done
+
+          echo "جاري جلب مكتبة json.hpp..."
+          curl -L -O https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp
+
+          echo "جاري بناء محرك Dobby للايفون (arm64)..."
+          git clone --depth 1 https://github.com/jmpews/Dobby.git dobby_src
+          cd dobby_src && mkdir build && cd build
+          cmake .. -DDOBBY_GENERATE_SHARED=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64
+          make -j$(sysctl -n hw.ncpu)
+          cd ../..
+          mkdir -p dobby/include dobby/lib
+          cp dobby_src/include/dobby.h dobby/include/
+          cp dobby_src/build/libdobby.a dobby/lib/
+
+      - name: 🔥 عملية الصهر (The Ultimate Compile)
+        run: |
+          echo "بدء عملية الصهر العنيفة لبرمجيات محمد الشمري..."
+          mkdir -p out
+          
+          # أمر التجميع الملكي: يدعم الـ Hooks، الرادار، وحظر الروابط
+          xcrun --sdk iphoneos clang++ -x objective-c++ -arch arm64 -shared -std=c++17 -O3 -fobjc-arc \
+          -I./imgui -I./dobby/include -I. \
+          wsam.cpp \
+          ./imgui/imgui.cpp ./imgui/imgui_draw.cpp ./imgui/imgui_widgets.cpp ./imgui/imgui_tables.cpp \
+          -L./dobby/lib -ldobby \
+          -framework Foundation -framework UIKit -framework Metal -framework QuartzCore \
+          -o out/WMASTER_Dragon.dylib
+          
+          echo "✅ تمت عملية الصهر بنجاح! ملف دراكون هاك جاهز."
+
+      - name: 📤 رفع ملف الـ Dylib الأسطوري
+        uses: actions/upload-artifact@v4
+        with:
+          name: DRAGON-HACK-SHAMMARI
+          path: out/WMASTER_Dragon.dylib
