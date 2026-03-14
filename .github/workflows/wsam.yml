@@ -1,4 +1,4 @@
-name: 🐲 DRAGON HACK - ALL IN ONE BUILDER (iOS)
+name: 🐲 DRAGON HACK - ULTIMATE ROYAL BUILDER (iOS)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_dragon:
-    name: صهر حماية محمد الشمري (arm64)
+    name: صهر محرك دراكون (محمد الشمري)
     runs-on: macos-latest
 
     steps:
@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       # ========================================================
-      # 1. خطوة التوليد: هنا يتم كتابة كود C++ الحقيقي برمجياً
+      # 1. التوليد البرمجي العنيف (C++ / Objective-C++)
       # ========================================================
       - name: 📝 توليد محرك دراكون (wsam.cpp)
         run: |
@@ -42,32 +42,66 @@ jobs:
           struct Matrix4x4 { float m[4][4]; };
 
           // ==========================================
-          // الأوفستات الحقيقية (سحب حي من السيرفر)
+          // 1. إحداثيات الرادار والمحرك (Offsets)
           // ==========================================
+          // سيتم سحبها من لوحة التحكم لتفادي الباند
           uintptr_t GWORLD_ADDR = 0x11223344; 
           uintptr_t GNAMES_ADDR = 0x55667788; 
 
-          // ==========================================
-          // برمجية حظر الروابط (Anti-Ban Hook)
-          // ==========================================
-          vector<string> Blacklist = { "log.cheat-detection.com", "anticheat.pubg.com", "crash.tencent.com" };
+          // [ضع إحداثيات خصائص الرادار هنا]
+          uintptr_t OFF_ACTOR_ARRAY = 0xA0;    // مصفوفة اللاعبين
+          uintptr_t OFF_HEALTH      = 0x988;   // إحداثي شريط الصحة (الدم)
+          uintptr_t OFF_NAME        = 0x640;   // إحداثي اسم اللاعب
+          uintptr_t OFF_BONE        = 0x5B0;   // إحداثي الهيكل العظمي (Skeleton)
+          uintptr_t OFF_VEHICLES    = 0x180;   // إحداثي العجلات والمركبات
+          uintptr_t OFF_LOOT        = 0x220;   // إحداثي الموارد والأسلحة
 
+          // [إحداثيات التفعيلات القتالية]
+          uintptr_t OFF_NO_RECOIL   = 0x1A2B3C; // ثبات السلاح
+          uintptr_t OFF_AIMBOT      = 0x4D5E6F; // تثبيت الإيم
+
+          // ==========================================
+          // 2. برمجية حظر الروابط (Anti-Ban Hook)
+          // ==========================================
+          // [أضف الروابط التي تريد حظرها هنا فقط]
+          vector<string> BlockedURLs = { 
+              "log.cheat-detection.com", 
+              "anticheat.pubg.com", 
+              "crash-report.tencent.com",
+              "127.0.0.1" 
+          };
+
+          // حالة الحماية القادمة من السيرفر
+          bool g_ServerBypassEnabled = true;
+
+          // هوك اعتراض اتصالات اللعبة (Socket Hook)
           static int (*Orig_Connect)(int, const struct sockaddr*, socklen_t);
           int Hook_Connect(int s, const struct sockaddr* name, socklen_t namelen) {
-              if (name->sa_family == AF_INET) {
+              if (g_ServerBypassEnabled && name->sa_family == AF_INET) {
                   struct sockaddr_in* addr = (struct sockaddr_in*)name;
                   char* ip = inet_ntoa(addr->sin_addr);
-                  // [Logic]: هنا يتم فحص الـ IP وحظره برمجياً
+                  
+                  // فحص إذا كان الـ IP أو الرابط ضمن القائمة المحظورة
+                  for (const auto& blocked : BlockedURLs) {
+                      // [هنا لوجك المقارنة الحقيقي لتبليك السيرفرات]
+                      // if (strstr(ip, blocked.c_str())) return -1; // يتم إرجاع خطأ لقطع الاتصال
+                  }
               }
               return Orig_Connect(s, name, namelen);
           }
 
+          // دالة تثبيت الهوكات
+          void InstallHooks() {
+              // DobbyHook((void*)dlsym(RTLD_DEFAULT, "connect"), (void*)Hook_Connect, (void**)&Orig_Connect);
+          }
+
           // ==========================================
-          // الاتصال والمزامنة (Server Commands)
+          // 3. الاتصال والمزامنة (Server Commands)
           // ==========================================
           const string SERVER = "http://34.204.178.160/panel.php?api=check&key=";
           bool g_Activated = false, g_Connected = false, g_Maintenance = false, g_MenuOpen = false;
           char g_Key[32] = "SHAMMARI-VIP-16X";
+          
           string g_SubStart = "14/03/2026", g_SubEnd = "14/04/2026";
 
           void ServerSync() {
@@ -79,21 +113,31 @@ jobs:
                           if(data) {
                               try {
                                   auto res = json::parse(string((char*)[data bytes], [data length]));
+                                  
+                                  // قراءة أوامر لوحة التحكم (التجميد والحماية)
                                   if(res["server_state"] == "danger") g_Maintenance = true;
+                                  else g_Maintenance = false;
+
                                   if(res["status"] == "success") {
                                       g_Connected = true;
+                                      
+                                      // قراءة حالة تفعيل الحماية من اللوحة
+                                      // g_ServerBypassEnabled = res["bypass_enabled"];
+
+                                      // حقن الأوفستات الحية فوراً
                                       GWORLD_ADDR = std::stoull(res["offsets"]["gworld"].get<string>(), 0, 16);
                                   }
                               } catch(...) { g_Connected = false; }
                           } else { g_Connected = false; }
                       }
                   }
-                  this_thread::sleep_for(chrono::seconds(g_Connected ? 15 : 2));
+                  // تحديث كل 10 ثواني إذا كان متصلاً، وكل ثانيتين إذا كان يحاول الاتصال
+                  this_thread::sleep_for(chrono::seconds(g_Connected ? 10 : 2));
               }
           }
 
           // ==========================================
-          // ثيم المكاتب الملكي
+          // 4. ثيم المكاتب الملكي الفخم
           // ==========================================
           void ApplyPremiumTheme() {
               ImGuiStyle& style = ImGui::GetStyle();
@@ -108,25 +152,54 @@ jobs:
           }
 
           // ==========================================
-          // واجهة دراكون (ImGui)
+          // 5. واجهة دراكون الاحترافية (ImGui)
           // ==========================================
           void RenderDragonUI() {
-              if(g_Maintenance) return;
+              // 1. نظام التجميد من اللوحة
+              if(g_Maintenance) {
+                  ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+                  ImGui::Begin("MNT", 0, ImGuiWindowFlags_NoDecoration);
+                  ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(0,0), ImGui::GetIO().DisplaySize, IM_COL32(0,0,0,255));
+                  ImGui::SetCursorPos(ImVec2(ImGui::GetIO().DisplaySize.x/2 - 100, ImGui::GetIO().DisplaySize.y/2));
+                  ImGui::TextColored(ImVec4(1,0,0,1), "SERVER FROZEN - BY AL-SHAMMARI");
+                  ImGui::End(); return;
+              }
+
               ApplyPremiumTheme();
 
-              // HUD شفاف يتحدث عند اللمس
+              // 2. الشريط العلوي الشفاف (متفاعل عند اللمس)
               ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, 35));
               ImGui::Begin("HUD", 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground);
-              if(ImGui::InvisibleButton("REF", ImVec2(ImGui::GetIO().DisplaySize.x, 35))) g_Connected = false; 
               
-              float pulse = (sin(ImGui::GetTime() * 4.0f) + 1.0f) * 0.5f;
-              ImU32 led = g_Connected ? IM_COL32(0,255,102, (int)(150+pulse*105)) : IM_COL32(255,51,102, 255);
-              ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(20, 17), 5, led);
-              ImGui::SetCursorPos(ImVec2(40, 8)); ImGui::TextColored(ImVec4(0,1,1,1), "متصل (Live)");
+              // زر غير مرئي فوق الشريط لتصفير الاتصال وتحديثه فوراً
+              if(ImGui::InvisibleButton("HUD_BTN", ImVec2(ImGui::GetIO().DisplaySize.x, 35))) {
+                  g_Connected = false; 
+              }
+              
+              // برمجة اللمبة النابضة (Blinking Dot)
+              float pulse = (sin(ImGui::GetTime() * 5.0f) + 1.0f) * 0.5f;
+              ImU32 led_col;
+              string status_text;
+              
+              if (g_Connected) {
+                  led_col = IM_COL32(0, 255, 102, (int)(150 + pulse * 105)); // أخضر يلمض
+                  status_text = "متصل (Live)";
+              } else {
+                  led_col = IM_COL32(255, 51, 102, 255); // أحمر ثابت
+                  status_text = "غير متصل (Offline)";
+              }
+
+              ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(20, 17), 6, led_col);
+              ImGui::SetCursorPos(ImVec2(35, 8)); 
+              ImGui::TextColored(g_Connected ? ImVec4(0,1,0.4f,1) : ImVec4(1,0.2f,0.4f,1), "%s", status_text.c_str());
+              
+              ImGui::SetCursorPos(ImVec2(ImGui::GetIO().DisplaySize.x/2 - 50, 8)); 
+              ImGui::TextColored(ImVec4(0.5f,0.5f,0.5f,1), "W-MASTER V4");
               ImGui::End();
 
               if(!g_MenuOpen) return;
 
+              // 3. المنيو الرئيسي المنسدل
               ImGui::SetNextWindowSize(ImVec2(340, 560), ImGuiCond_FirstUseEver);
               ImGui::Begin(u8"🦅 حماية محمد الشمري", &g_MenuOpen);
 
@@ -137,9 +210,9 @@ jobs:
               ImGui::EndChild();
 
               if (ImGui::CollapsingHeader(u8"🛡️ إعدادات الحماية والتبليك")) {
-                  static bool bypass=true, block=true;
-                  ImGui::Checkbox(u8"تفعيل الحماية (Bypass)", &bypass);
-                  ImGui::Checkbox(u8"حظر روابط الباند (URL Hook)", &block);
+                  ImGui::Checkbox(u8"تفعيل الحماية من اللوحة (Server Bypass)", &g_ServerBypassEnabled);
+                  static bool block_urls = true;
+                  ImGui::Checkbox(u8"حظر روابط الباند (URL Blocker)", &block_urls);
               }
 
               if (ImGui::CollapsingHeader(u8"👁️ رادار كشف الأماكن (ESP)")) {
@@ -147,16 +220,17 @@ jobs:
                   ImGui::Checkbox(u8"تفعيل الرادار الرئيسي", &esp_m);
                   if(esp_m) {
                       ImGui::Indent();
-                      static bool box, hp, skel, name;
+                      static bool box, hp, name, skel;
                       ImGui::Checkbox(u8"صندوق اللاعب (2D Box)", &box);
-                      ImGui::Checkbox(u8"شريط الصحة (HP Bar)", &hp);
-                      ImGui::Checkbox(u8"الأسماء والمسافة", &name);
+                      ImGui::Checkbox(u8"شريط الصحة (Health)", &hp);
+                      ImGui::Checkbox(u8"الاسم والمسافة", &name);
                       ImGui::Checkbox(u8"الهيكل العظمي (Skeleton)", &skel);
+                      ImGui::Separator();
+                      static bool veh, loot;
+                      ImGui::Checkbox(u8"رادار المركبات والعجلات", &veh);
+                      ImGui::Checkbox(u8"رادار الأسلحة والموارد", &loot);
                       ImGui::Unindent();
                   }
-                  static bool veh, loot;
-                  ImGui::Checkbox(u8"رادار المركبات والعجلات", &veh);
-                  ImGui::Checkbox(u8"رادار الأسلحة والموارد", &loot);
               }
 
               if (ImGui::CollapsingHeader(u8"🎯 الأيمبوت والمميزات")) {
@@ -171,13 +245,14 @@ jobs:
           }
 
           // ==========================================
-          // الإقلاع العنيف (قبل شعار الشركة)
+          // 6. الإقلاع العنيف (قبل شعار الشركة)
           // ==========================================
           __attribute__((constructor))
-          void Start() {
+          void StartDragon() {
               thread([]() {
+                  // منع اللعبة من التقدم لمدة ثانية للتأكد من التشغيل الاستباقي
                   this_thread::sleep_for(chrono::seconds(1));
-                  DobbyHook((void*)dlsym(RTLD_DEFAULT, "connect"), (void*)Hook_Connect, (void**)&Orig_Connect);
+                  InstallHooks();
                   thread(ServerSync).detach();
                   g_Activated = true; 
                   g_MenuOpen = true; 
@@ -186,17 +261,17 @@ jobs:
           EOF
 
       # ========================================================
-      # 2. تجهيز بيئة البناء
+      # 2. تجهيز بيئة البناء والتوافقية
       # ========================================================
       - name: 🛠️ تجهيز Xcode SDK
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
       # ========================================================
-      # 3. تحميل المكاتب (بطريقة Git السريعة لحل مشكلة التحميل)
+      # 3. تحميل المكاتب (حل جذري وموثوق 100%)
       # ========================================================
       - name: 🌐 تحميل المكاتب (ImGui, Dobby, Json)
         run: |
-          echo "تحميل مكتبة ImGui بشكل آمن وسريع..."
+          echo "تحميل مكتبة ImGui..."
           git clone --depth 1 https://github.com/ocornut/imgui.git imgui_src
           mkdir -p imgui
           cp imgui_src/*.h imgui_src/*.cpp imgui/
@@ -204,10 +279,13 @@ jobs:
           echo "تحميل مكتبة Json..."
           curl -sSL -o json.hpp https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp
           
-          echo "بناء مكتبة Dobby للايفون..."
+          echo "بناء مكتبة Dobby للايفون (مع إجبار المعمارية)..."
           git clone --depth 1 https://github.com/jmpews/Dobby.git dobby_src
           cd dobby_src && mkdir build && cd build
-          cmake .. -DDOBBY_GENERATE_SHARED=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_SYSTEM_NAME=iOS
+          
+          # [تصحيح مسعود]: الأوامر الحتمية لبناء Dobby للـ iOS بدون أخطاء
+          cmake .. -DDOBBY_GENERATE_SHARED=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT=iphoneos
+          
           make -j4 && cd ../..
           mkdir -p dobby/include dobby/lib
           cp dobby_src/include/dobby.h dobby/include/ && cp dobby_src/build/libdobby.a dobby/lib/
