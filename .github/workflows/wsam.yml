@@ -19,7 +19,7 @@ jobs:
         echo "جاري تجهيز بيئة حماية محمد الشمري..."
         sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-    - name: 🌐 تحميل المكتبات الناقصة (ImGui, Dobby, Json)
+    - name: 🌐 تحميل المكتبات الناقصة (ImGui كاملة, Dobby, Json)
       run: |
         echo "جاري تحميل مكتبة json.hpp..."
         curl -O https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp
@@ -33,6 +33,9 @@ jobs:
         curl -o imgui/imgui_widgets.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui_widgets.cpp
         curl -o imgui/imgui_tables.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui_tables.cpp
         curl -o imgui/imgui_internal.h https://raw.githubusercontent.com/ocornut/imgui/master/imgui_internal.h
+        curl -o imgui/imstb_rectpack.h https://raw.githubusercontent.com/ocornut/imgui/master/imstb_rectpack.h
+        curl -o imgui/imstb_textedit.h https://raw.githubusercontent.com/ocornut/imgui/master/imstb_textedit.h
+        curl -o imgui/imstb_truetype.h https://raw.githubusercontent.com/ocornut/imgui/master/imstb_truetype.h
 
         echo "جاري تحميل وتجهيز مكتبة Dobby..."
         git clone https://github.com/jmpews/Dobby.git dobby_src
@@ -50,7 +53,7 @@ jobs:
         echo "بدأ عملية الصهر العنيفة..."
         mkdir -p build_output
         
-        # أمر الترجمة للايفون (بدون Curl واستخدام Objective-C++)
+        # أمر الترجمة للايفون (بدون Curl واستخدام تقنية أبل الأصلية Objective-C++)
         xcrun --sdk iphoneos clang++ -x objective-c++ -arch arm64 -shared -std=c++17 -O3 -fobjc-arc \
         -I./imgui -I./dobby/include -I. \
         wsam.cpp \
