@@ -29,6 +29,7 @@ jobs:
 
         echo "جاري تحميل مكتبة ImGui..."
         mkdir -p imgui
+        curl -o imgui/imconfig.h https://raw.githubusercontent.com/ocornut/imgui/master/imconfig.h
         curl -o imgui/imgui.h https://raw.githubusercontent.com/ocornut/imgui/master/imgui.h
         curl -o imgui/imgui.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui.cpp
         curl -o imgui/imgui_draw.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui_draw.cpp
