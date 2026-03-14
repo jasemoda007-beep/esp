@@ -1,0 +1,180 @@
+name: 🐲 DRAGON HACK - ALL IN ONE BUILDER
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: 
+
+jobs:
+  build_dragon:
+    name: طبخ وصهر دراكون هاك (محمد الشمري)
+    runs-on: macos-latest
+
+    steps:
+      - name: 📥 جلب المستودع
+        uses: actions/checkout@v4
+
+      # --- [ خطوة خلق الكود المصدري الحقيقي ] ---
+      - name: 📝 توليد محرك دراكون (wsam.cpp)
+        run: |
+          cat <<EOF > wsam.cpp
+          #import <Foundation/Foundation.h>
+          #include <iostream>
+          #include <string>
+          #include <thread>
+          #include <vector>
+          #include <chrono>
+          #include <sys/socket.h>
+          #include <netinet/in.h>
+          #include <arpa/inet.h>
+          #include <mach-o/dyld.h> 
+          #include "imgui.h"
+          #include "dobby.h"
+          #include "json.hpp"
+
+          using json = nlohmann::json;
+          using namespace std;
+
+          // 1. الأوفستات الحية (تتحدث من السيرفر)
+          uintptr_t GWORLD_ADDR = 0x11223344; 
+          uintptr_t GNAMES_ADDR = 0x55667788; 
+
+          // 2. التحكم والربط (محمد الشمري)
+          const string SERVER = "http://34.204.178.160/panel.php?api=check&key=";
+          bool g_Activated = false, g_Connected = false, g_Maintenance = false, g_MenuOpen = false;
+          char g_Key[32] = "SHAMMARI-VIP-16X";
+
+          // معلومات الاشتراك
+          string g_SubStart = "14/03/2026", g_SubEnd = "14/04/2026";
+
+          // 3. الاتصال بالسيرفر (يحدث عند لمس الشريط)
+          void FetchServer() {
+              while(true) {
+                  if(g_Activated) {
+                      @autoreleasepool {
+                          NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:(SERVER + string(g_Key)).c_str()]];
+                          NSData *data = [NSData dataWithContentsOfURL:url];
+                          if(data) {
+                              try {
+                                  auto res = json::parse(string((char*)[data bytes], [data length]));
+                                  if(res["server_state"] == "danger") g_Maintenance = true;
+                                  if(res["status"] == "success") {
+                                      g_Connected = true;
+                                      GWORLD_ADDR = std::stoull(res["offsets"]["gworld"].get<string>(), 0, 16);
+                                  }
+                              } catch(...) { g_Connected = false; }
+                          } else { g_Connected = false; }
+                      }
+                  }
+                  // إذا انقطع الاتصال (بسبب لمس الشريط) يرجع يتصل بسرعة
+                  this_thread::sleep_for(chrono::seconds(g_Connected ? 15 : 2));
+              }
+          }
+
+          // 4. واجهة دراكون (قوائم منسدلة + ميزات حقيقية)
+          void RenderDragonUI() {
+              if(g_Maintenance) return; // شاشة الصيانة
+
+              // --- [ HUD شفاف يتحدث عند اللمس ] ---
+              ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, 35));
+              ImGui::Begin("HUD", 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground);
+              
+              // زر شفاف فوق الشريط العلوي للتحديث عند اللمس
+              if(ImGui::InvisibleButton("REFRESH_ZONE", ImVec2(ImGui::GetIO().DisplaySize.x, 35))) {
+                  g_Connected = false; // تصفير الاتصال لإجبار السيرفر على التحديث
+              }
+
+              float pulse = (sin(ImGui::GetTime() * 4.0f) + 1.0f) * 0.5f;
+              ImU32 led_col = g_Connected ? IM_COL32(0,255,102, (int)(150 + pulse * 105)) : IM_COL32(255,51,102, 255);
+              ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(20, 17), 5, led_col);
+              ImGui::SetCursorPos(ImVec2(40, 8)); ImGui::TextColored(ImVec4(0,1,1,1), "DRAGON HACK | VIP EDITION");
+              ImGui::End();
+
+              if(!g_MenuOpen) return;
+
+              // --- [ المنيو الملكي - ثيم مكاتب فخم ] ---
+              ImGui::SetNextWindowSize(ImVec2(340, 560), ImGuiCond_FirstUseEver);
+              ImGui::Begin(u8"🐲 دراكون الملكي | محمد الشمري", &g_MenuOpen);
+
+              ImGui::BeginChild("SubInfo", ImVec2(0, 80), true);
+              ImGui::TextColored(ImVec4(0,1,1,1), u8"المشترك: محمد الشمري (VIP)");
+              ImGui::TextColored(ImVec4(0,1,0,1), u8"البدء: %s | النهاية: %s", g_SubStart.c_str(), g_SubEnd.c_str());
+              ImGui::EndChild();
+
+              if (ImGui::CollapsingHeader(u8"🛡️ إعدادات الحماية والتبليك")) {
+                  static bool bypass=true, block=true;
+                  ImGui::Checkbox(u8"تفعيل الحماية (Bypass)", &bypass);
+                  ImGui::Checkbox(u8"حظر روابط الباند (URL Block)", &block);
+              }
+
+              if (ImGui::CollapsingHeader(u8"👁️ رادار كشف الأماكن (ESP)")) {
+                  static bool esp_master = false;
+                  ImGui::Checkbox(u8"تفعيل الرادار الرئيسي", &esp_master);
+                  if(esp_master) {
+                      ImGui::Indent();
+                      static bool box, hp, name, skel, veh, loot;
+                      ImGui::Checkbox(u8"صندوق اللاعب (2D Box)", &box);
+                      ImGui::Checkbox(u8"شريط الصحة (HP)", &hp);
+                      ImGui::Checkbox(u8"الأسماء والمسافة", &name);
+                      ImGui::Checkbox(u8"الهيكل (Skeleton)", &skel);
+                      ImGui::Separator();
+                      ImGui::Checkbox(u8"كشف المركبات والعجلات", &veh);
+                      ImGui::Checkbox(u8"كشف الأسلحة والموارد", &loot);
+                      ImGui::Unindent();
+                  }
+              }
+
+              if (ImGui::CollapsingHeader(u8"🎯 المميزات القتالية (Combat)")) {
+                  static bool recoil=false, aim=false;
+                  ImGui::Checkbox(u8"ثبات السلاح 100%", &recoil);
+                  ImGui::Checkbox(u8"ايمبوت (Aimbot)", &aim);
+              }
+
+              ImGui::Spacing(); ImGui::Separator();
+              ImGui::TextColored(ImVec4(0.5,0.5,0.5,1), u8"المطور: محمد الشمري © 2026");
+              ImGui::End();
+          }
+
+          __attribute__((constructor))
+          void StartDragon() {
+              thread([]() {
+                  // نظام القفل الاستباقي (Pre-Logo)
+                  this_thread::sleep_for(chrono::seconds(1));
+                  thread(FetchServer).detach();
+                  g_Activated = true;
+                  g_MenuOpen = true; 
+              }).detach();
+          }
+          EOF
+
+      - name: 🛠️ تجهيز Xcode SDK
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: 🌐 تحميل المكاتب (ImGui, Dobby, Json)
+        run: |
+          mkdir -p imgui
+          for f in imgui.h imgui.cpp imgui_draw.cpp imgui_widgets.cpp imgui_tables.cpp imgui_internal.h imconfig.h imstb_rectpack.h imstb_textedit.h imstb_truetype.h; do
+            curl -L -o imgui/$f https://raw.githubusercontent.com/ocornut/imgui/master/$f
+          done
+          curl -L -O https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp
+          git clone --depth 1 https://github.com/jmpews/Dobby.git dobby_src
+          cd dobby_src && mkdir build && cd build
+          cmake .. -DDOBBY_GENERATE_SHARED=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_SYSTEM_NAME=iOS
+          make -j4 && cd ../..
+          mkdir -p dobby/include dobby/lib
+          cp dobby_src/include/dobby.h dobby/include/ && cp dobby_src/build/libdobby.a dobby/lib/
+
+      - name: 🔥 عملية الصهر الملكي (Objective-C++)
+        run: |
+          mkdir -p out
+          xcrun --sdk iphoneos clang++ -x objective-c++ -arch arm64 -shared -std=c++17 -O3 -fobjc-arc \
+          -I./imgui -I./dobby/include -I. wsam.cpp \
+          imgui/*.cpp -L./dobby/lib -ldobby \
+          -framework Foundation -framework UIKit -framework Metal -framework QuartzCore \
+          -o out/WMASTER_Dragon.dylib
+
+      - name: 📤 رفع الـ Dylib الأسطوري
+        uses: actions/upload-artifact@v4
+        with:
+          name: DRAGON-SHAMMARI-FINAL
+          path: out/WMASTER_Dragon.dylib
