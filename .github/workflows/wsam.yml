@@ -1,4 +1,4 @@
-name: 🦅 W-MASTER Dylib Builder
+name: 🦅 W-MASTER Dylib Builder (Auto-Fetch)
 
 on:
   push:
@@ -11,30 +11,61 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - name: 📥 جلب ملفات المشروع
-      uses: actions/checkout@v4 # تم التحديث إلى v4
-      with:
-        submodules: recursive 
+    # 1. سحب كودك الأساسي (wsam.cpp)
+    - name: 📥 جلب ملفات المشروع الأساسية
+      uses: actions/checkout@v4
 
+    # 2. تجهيز بيئة الايفون (Xcode)
     - name: 🛠️ تجهيز أدوات بناء الايفون (SDK)
       run: |
         echo "جاري تجهيز بيئة حماية محمد الشمري..."
         sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+    # 3. السحر هنا: تحميل ImGui و Dobby و JSON تلقائياً
+    - name: 🌐 تحميل المكتبات الناقصة (ImGui, Dobby, Json)
+      run: |
+        echo "جاري تحميل مكتبة json.hpp..."
+        curl -O https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp
+
+        echo "جاري تحميل مكتبة ImGui..."
+        mkdir -p imgui
+        curl -o imgui/imgui.h https://raw.githubusercontent.com/ocornut/imgui/master/imgui.h
+        curl -o imgui/imgui.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui.cpp
+        curl -o imgui/imgui_draw.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui_draw.cpp
+        curl -o imgui/imgui_widgets.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui_widgets.cpp
+        curl -o imgui/imgui_tables.cpp https://raw.githubusercontent.com/ocornut/imgui/master/imgui_tables.cpp
+        curl -o imgui/imgui_internal.h https://raw.githubusercontent.com/ocornut/imgui/master/imgui_internal.h
+        curl -o imgui/imstb_rectpack.h https://raw.githubusercontent.com/ocornut/imgui/master/imstb_rectpack.h
+        curl -o imgui/imstb_textedit.h https://raw.githubusercontent.com/ocornut/imgui/master/imstb_textedit.h
+        curl -o imgui/imstb_truetype.h https://raw.githubusercontent.com/ocornut/imgui/master/imstb_truetype.h
+
+        echo "جاري تحميل وتجهيز مكتبة Dobby..."
+        git clone https://github.com/jmpews/Dobby.git dobby_src
+        cd dobby_src
+        # بناء Dobby لمعمارية الايفون arm64
+        mkdir build && cd build
+        cmake .. -DDOBBY_GENERATE_SHARED=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64
+        make
+        cd ../..
+        mkdir -p dobby/include dobby/lib
+        cp dobby_src/include/dobby.h dobby/include/
+        cp dobby_src/build/libdobby.a dobby/lib/
         
-    - name: 📦 تثبيت مكتبة Curl و Json
+    # 4. تثبيت Curl للماك
+    - name: 📦 تثبيت مكتبة Curl
       run: |
         brew install curl
-        brew install nlohmann-json 
 
+    # 5. عملية الصهر والدمج
     - name: 🔥 دمج الكود وصناعة الـ Dylib
       run: |
-        echo "بدأ عملية الصهر..."
+        echo "بدأ عملية الصهر العنيفة..."
         mkdir -p build_output
         
-        # أمر الترجمة (نفسه بدون تغيير لأن الكود نظيف 100%)
+        # أمر الترجمة للايفون
         xcrun --sdk iphoneos clang++ -arch arm64 -shared \
         -std=c++17 -O3 -fobjc-arc \
-        -I./imgui -I./dobby/include -I/usr/local/include \
+        -I./imgui -I./dobby/include -I. -I/usr/local/include \
         wsam.cpp \
         ./imgui/imgui.cpp ./imgui/imgui_draw.cpp ./imgui/imgui_widgets.cpp ./imgui/imgui_tables.cpp \
         -L./dobby/lib -ldobby \
@@ -44,9 +75,9 @@ jobs:
         
         echo "✅ تمت عملية الصهر بنجاح! ملف Dylib جاهز."
 
-    # 🚀 هنا كان الخطأ، تم التحديث إلى v4
+    # 6. رفع الملف النهائي
     - name: 📤 رفع ملف الـ Dylib الجاهز للتحميل
-      uses: actions/upload-artifact@v4 
+      uses: actions/upload-artifact@v4
       with:
         name: WMASTER-Shammari-iOS
         path: build_output/WMASTER_Shammari.dylib
