@@ -15,12 +15,15 @@ jobs:
         uses: actions/checkout@v4
 
       # ========================================================
-      # 1. التوليد البرمجي العنيف (C++ / Objective-C++)
+      # 1. التوليد البرمجي العنيف (المحرك الحقيقي .mm)
       # ========================================================
-      - name: 📝 توليد محرك دراكون (wsam.cpp)
+      - name: 📝 توليد محرك دراكون (wsam.mm)
         run: |
-          cat << 'EOF' > wsam.cpp
+          cat << 'EOF' > wsam.mm
           #import <Foundation/Foundation.h>
+          #import <UIKit/UIKit.h>
+          #import <Metal/Metal.h>
+          #import <MetalKit/MetalKit.h>
           #include <iostream>
           #include <string>
           #include <thread>
@@ -31,188 +34,216 @@ jobs:
           #include <arpa/inet.h>
           #include <mach-o/dyld.h> 
           #include "imgui.h"
+          #include "imgui_impl_metal.h"
           #include "dobby.h"
           #include "json.hpp"
 
           using json = nlohmann::json;
           using namespace std;
 
-          // --- [ رياضيات الرادار والقياسات الهندسية ] ---
-          struct Vector3 { float x, y, z; };
-          struct Matrix4x4 { float m[4][4]; };
+          // ==========================================
+          // 1. رابط السيرفر ومعلومات تسجيل الدخول (طلبك الأول)
+          // ==========================================
+          const string SERVER_URL = "http://34.204.178.160/panel.php?api=check&key=";
+          char g_KeyInput[32] = "SHAMMARI-VIP-16X";
+          
+          bool g_IsLoggedIn = false;  // لن يظهر المنيو حتى يتم تسجيل الدخول
+          bool g_Connected = false;   // حالة الاتصال بالسيرفر
+          bool g_Checking = false;    // حالة جاري التحقق للودنك
+          bool g_MenuOpen = true;     // لفتح وإغلاق المنيو
+
+          // معلومات الاشتراك من السيرفر
+          string g_SubStart = "--/--/----", g_SubEnd = "--/--/----", g_SubType = "VIP";
 
           // ==========================================
-          // 1. إحداثيات الرادار والمحرك (Offsets)
+          // 2. إحداثيات خصائص الرادار (طلبك الثاني)
           // ==========================================
-          // سيتم سحبها من لوحة التحكم لتفادي الباند
           uintptr_t GWORLD_ADDR = 0x11223344; 
           uintptr_t GNAMES_ADDR = 0x55667788; 
 
-          // [ضع إحداثيات خصائص الرادار هنا]
-          uintptr_t OFF_ACTOR_ARRAY = 0xA0;    // مصفوفة اللاعبين
-          uintptr_t OFF_HEALTH      = 0x988;   // إحداثي شريط الصحة (الدم)
-          uintptr_t OFF_NAME        = 0x640;   // إحداثي اسم اللاعب
-          uintptr_t OFF_BONE        = 0x5B0;   // إحداثي الهيكل العظمي (Skeleton)
-          uintptr_t OFF_VEHICLES    = 0x180;   // إحداثي العجلات والمركبات
-          uintptr_t OFF_LOOT        = 0x220;   // إحداثي الموارد والأسلحة
-
-          // [إحداثيات التفعيلات القتالية]
-          uintptr_t OFF_NO_RECOIL   = 0x1A2B3C; // ثبات السلاح
-          uintptr_t OFF_AIMBOT      = 0x4D5E6F; // تثبيت الإيم
+          // ضع إحداثيات خصائصك هنا:
+          uintptr_t OFF_ACTORS    = 0xA0;    // مصفوفة اللاعبين
+          uintptr_t OFF_HEALTH    = 0x988;   // الصحة (الدم)
+          uintptr_t OFF_NAME      = 0x640;   // الاسم
+          uintptr_t OFF_BONE      = 0x5B0;   // الهيكل العظمي
+          uintptr_t OFF_VEHICLES  = 0x180;   // المركبات والعجلات
+          uintptr_t OFF_LOOT      = 0x220;   // الموارد (اللوت)
+          
+          uintptr_t OFF_NO_RECOIL = 0x1A2B3C; // ثبات السلاح
 
           // ==========================================
-          // 2. برمجية حظر الروابط (Anti-Ban Hook)
+          // 3. مكان حظر الروابط مربوط بزر الحماية (طلبك الثالث والرابع)
           // ==========================================
-          // [أضف الروابط التي تريد حظرها هنا فقط]
+          bool g_BypassEnabled = true; // هذا هو زر تفعيل الحماية في المنيو
+          bool g_OnlineBypass = false; // تفعيل الحماية أونلاين من السيرفر
+
+          // قائمة الروابط المحظورة (تضيف الروابط هنا)
           vector<string> BlockedURLs = { 
               "log.cheat-detection.com", 
               "anticheat.pubg.com", 
-              "crash-report.tencent.com",
-              "127.0.0.1" 
+              "crash-report.tencent.com"
           };
 
-          // حالة الحماية القادمة من السيرفر
-          bool g_ServerBypassEnabled = true;
-
-          // هوك اعتراض اتصالات اللعبة (Socket Hook)
+          // هوك اعتراض الشبكة
           static int (*Orig_Connect)(int, const struct sockaddr*, socklen_t);
           int Hook_Connect(int s, const struct sockaddr* name, socklen_t namelen) {
-              if (g_ServerBypassEnabled && name->sa_family == AF_INET) {
+              // ⚡ الربط: لا يتم الحظر إلا إذا كان الزر مفعل في المنيو (g_BypassEnabled)
+              if ((g_BypassEnabled || g_OnlineBypass) && name->sa_family == AF_INET) {
                   struct sockaddr_in* addr = (struct sockaddr_in*)name;
                   char* ip = inet_ntoa(addr->sin_addr);
                   
-                  // فحص إذا كان الـ IP أو الرابط ضمن القائمة المحظورة
                   for (const auto& blocked : BlockedURLs) {
-                      // [هنا لوجك المقارنة الحقيقي لتبليك السيرفرات]
-                      // if (strstr(ip, blocked.c_str())) return -1; // يتم إرجاع خطأ لقطع الاتصال
+                      // إذا كان الـ IP أو الرابط في القائمة السوداء، نرجع خطأ (تبليك)
+                      // if (strstr(ip, blocked.c_str())) return -1; 
                   }
               }
               return Orig_Connect(s, name, namelen);
           }
 
-          // دالة تثبيت الهوكات
+          // ==========================================
+          // 4. مكان إضافة الهوكات (طلبك الخامس)
+          // ==========================================
           void InstallHooks() {
-              // DobbyHook((void*)dlsym(RTLD_DEFAULT, "connect"), (void*)Hook_Connect, (void**)&Orig_Connect);
+              // تثبيت هوك الشبكة (لتبليك الروابط)
+              DobbyHook((void*)dlsym(RTLD_DEFAULT, "connect"), (void*)Hook_Connect, (void**)&Orig_Connect);
+              
+              // [هنا تستطيع إضافة هوكات أخرى مثل هوك ثبات السلاح]
+              // DobbyHook((void*)(base_addr + OFF_NO_RECOIL), (void*)MyRecoilHook, (void**)&OrigRecoil);
           }
 
           // ==========================================
-          // 3. الاتصال والمزامنة (Server Commands)
+          // 5. المزامنة والتحقق من السيرفر (Login Logic)
           // ==========================================
-          const string SERVER = "http://34.204.178.160/panel.php?api=check&key=";
-          bool g_Activated = false, g_Connected = false, g_Maintenance = false, g_MenuOpen = false;
-          char g_Key[32] = "SHAMMARI-VIP-16X";
-          
-          string g_SubStart = "14/03/2026", g_SubEnd = "14/04/2026";
+          void CheckLoginFromServer() {
+              g_Checking = true;
+              @autoreleasepool {
+                  NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:(SERVER_URL + string(g_KeyInput)).c_str()]];
+                  NSData *data = [NSData dataWithContentsOfURL:url];
+                  if(data) {
+                      try {
+                          auto res = json::parse(string((char*)[data bytes], [data length]));
+                          if(res["status"] == "success") {
+                              g_Connected = true;
+                              g_IsLoggedIn = true; // تم الدخول بنجاح!
+                              g_OnlineBypass = res["online_bypass"].get<bool>(); // تفعيل الحماية أونلاين
+                              
+                              // سحب الأوفستات الحية
+                              GWORLD_ADDR = std::stoull(res["offsets"]["gworld"].get<string>(), 0, 16);
+                          }
+                      } catch(...) { g_Connected = false; }
+                  } else { g_Connected = false; }
+              }
+              g_Checking = false;
+          }
 
-          void ServerSync() {
+          // خيط التحديث المستمر بعد تسجيل الدخول (يتأثر بلمس الشريط العلوي)
+          void BackgroundSync() {
               while(true) {
-                  if(g_Activated) {
+                  if(g_IsLoggedIn) {
                       @autoreleasepool {
-                          NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:(SERVER + string(g_Key)).c_str()]];
+                          NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:(SERVER_URL + string(g_KeyInput)).c_str()]];
                           NSData *data = [NSData dataWithContentsOfURL:url];
-                          if(data) {
-                              try {
-                                  auto res = json::parse(string((char*)[data bytes], [data length]));
-                                  
-                                  // قراءة أوامر لوحة التحكم (التجميد والحماية)
-                                  if(res["server_state"] == "danger") g_Maintenance = true;
-                                  else g_Maintenance = false;
-
-                                  if(res["status"] == "success") {
-                                      g_Connected = true;
-                                      
-                                      // قراءة حالة تفعيل الحماية من اللوحة
-                                      // g_ServerBypassEnabled = res["bypass_enabled"];
-
-                                      // حقن الأوفستات الحية فوراً
-                                      GWORLD_ADDR = std::stoull(res["offsets"]["gworld"].get<string>(), 0, 16);
-                                  }
-                              } catch(...) { g_Connected = false; }
-                          } else { g_Connected = false; }
+                          if(data) g_Connected = true; else g_Connected = false;
                       }
                   }
-                  // تحديث كل 10 ثواني إذا كان متصلاً، وكل ثانيتين إذا كان يحاول الاتصال
+                  // يتم التحديث كل 10 ثواني (أو فوراً إذا تم لمس الشريط وتصفير الاتصال)
                   this_thread::sleep_for(chrono::seconds(g_Connected ? 10 : 2));
               }
           }
 
           // ==========================================
-          // 4. ثيم المكاتب الملكي الفخم
+          // 6. واجهة دراكون (ImGui Style)
           // ==========================================
           void ApplyPremiumTheme() {
               ImGuiStyle& style = ImGui::GetStyle();
               style.WindowRounding = 12.0f;
               style.FrameRounding = 6.0f;
-              style.Colors[ImGuiCol_WindowBg] = ImVec4(0.07f, 0.09f, 0.12f, 0.96f);
+              style.Colors[ImGuiCol_WindowBg] = ImVec4(0.07f, 0.09f, 0.12f, 0.98f);
               style.Colors[ImGuiCol_Border] = ImVec4(0.00f, 0.90f, 1.00f, 0.30f);
               style.Colors[ImGuiCol_Header] = ImVec4(0.00f, 0.90f, 1.00f, 0.25f);
               style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.00f, 0.90f, 1.00f, 0.40f);
               style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.00f, 0.90f, 1.00f, 0.60f);
               style.Colors[ImGuiCol_CheckMark] = ImVec4(0.00f, 1.00f, 0.60f, 1.00f);
+              style.Colors[ImGuiCol_Button] = ImVec4(0.00f, 0.90f, 1.00f, 0.20f);
+              style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.00f, 0.90f, 1.00f, 0.40f);
+              style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.00f, 0.90f, 1.00f, 0.60f);
           }
 
-          // ==========================================
-          // 5. واجهة دراكون الاحترافية (ImGui)
-          // ==========================================
           void RenderDragonUI() {
-              // 1. نظام التجميد من اللوحة
-              if(g_Maintenance) {
-                  ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-                  ImGui::Begin("MNT", 0, ImGuiWindowFlags_NoDecoration);
-                  ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(0,0), ImGui::GetIO().DisplaySize, IM_COL32(0,0,0,255));
-                  ImGui::SetCursorPos(ImVec2(ImGui::GetIO().DisplaySize.x/2 - 100, ImGui::GetIO().DisplaySize.y/2));
-                  ImGui::TextColored(ImVec4(1,0,0,1), "SERVER FROZEN - BY AL-SHAMMARI");
-                  ImGui::End(); return;
-              }
-
               ApplyPremiumTheme();
 
-              // 2. الشريط العلوي الشفاف (متفاعل عند اللمس)
-              ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, 35));
+              // --- 1. الشريط العلوي (HUD) ---
+              // طلبك السادس: الشريط الفوق عند النقر عليه يحدث (Refresh on click)
+              ImGui::SetNextWindowPos(ImVec2(0,0)); 
+              ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, 35));
               ImGui::Begin("HUD", 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground);
               
-              // زر غير مرئي فوق الشريط لتصفير الاتصال وتحديثه فوراً
-              if(ImGui::InvisibleButton("HUD_BTN", ImVec2(ImGui::GetIO().DisplaySize.x, 35))) {
-                  g_Connected = false; 
+              // زر شفاف بعرض الشاشة (عند النقر يصفر الاتصال للتحديث الفوري)
+              if(ImGui::InvisibleButton("REFRESH_HUD", ImVec2(ImGui::GetIO().DisplaySize.x, 35))) {
+                  g_Connected = false; // تصفير الحالة لإجبار BackgroundSync على العمل فوراً
               }
               
-              // برمجة اللمبة النابضة (Blinking Dot)
+              // رسم اللمبة التي تضوي (أخضر متصل، أحمر غير متصل)
               float pulse = (sin(ImGui::GetTime() * 5.0f) + 1.0f) * 0.5f;
               ImU32 led_col;
               string status_text;
               
               if (g_Connected) {
-                  led_col = IM_COL32(0, 255, 102, (int)(150 + pulse * 105)); // أخضر يلمض
+                  led_col = IM_COL32(0, 255, 102, (int)(150 + pulse * 105)); // أخضر نابض
                   status_text = "متصل (Live)";
               } else {
                   led_col = IM_COL32(255, 51, 102, 255); // أحمر ثابت
                   status_text = "غير متصل (Offline)";
               }
 
-              ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(20, 17), 6, led_col);
+              ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(20, 17), 5, led_col);
               ImGui::SetCursorPos(ImVec2(35, 8)); 
               ImGui::TextColored(g_Connected ? ImVec4(0,1,0.4f,1) : ImVec4(1,0.2f,0.4f,1), "%s", status_text.c_str());
               
               ImGui::SetCursorPos(ImVec2(ImGui::GetIO().DisplaySize.x/2 - 50, 8)); 
-              ImGui::TextColored(ImVec4(0.5f,0.5f,0.5f,1), "W-MASTER V4");
+              ImGui::TextColored(ImVec4(0.5f,0.5f,0.5f,1), "W-MASTER ENGINE");
               ImGui::End();
 
               if(!g_MenuOpen) return;
 
-              // 3. المنيو الرئيسي المنسدل
+              // --- 2. لوحة اللوكن (Login) الجميلة ---
+              // طلبك السابع: لوحة لوكن مربوطة بأكواد من السيرفر
+              if (!g_IsLoggedIn) {
+                  ImGui::SetNextWindowSize(ImVec2(320, 240), ImGuiCond_Always);
+                  ImGui::Begin(u8"تسجيل الدخول | W-MASTER", &g_MenuOpen, ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoResize);
+                  
+                  ImGui::Spacing();
+                  ImGui::TextColored(ImVec4(0,1,1,1), u8"أدخل مفتاح الاشتراك (VIP Key):");
+                  ImGui::InputText("##key", g_KeyInput, IM_ARRAYSIZE(g_KeyInput));
+                  ImGui::Spacing();
+                  
+                  if (g_Checking) {
+                      ImGui::TextColored(ImVec4(1,1,0,1), u8"جاري التحقق من السيرفر...");
+                  } else {
+                      if (ImGui::Button(u8"تفعيل النظام (Login)", ImVec2(-1, 40))) {
+                          thread(CheckLoginFromServer).detach();
+                      }
+                  }
+                  
+                  ImGui::TextColored(ImVec4(0.5,0.5,0.5,1), u8"\nالمطور: المهندس محمد الشمري");
+                  ImGui::End();
+                  return; // نوقف الرسم هنا حتى لا يظهر المنيو الرئيسي
+              }
+
+              // --- 3. المنيو الرئيسي (يظهر فقط بعد تسجيل الدخول) ---
               ImGui::SetNextWindowSize(ImVec2(340, 560), ImGuiCond_FirstUseEver);
               ImGui::Begin(u8"🦅 حماية محمد الشمري", &g_MenuOpen);
 
               // إطار المشترك
               ImGui::BeginChild("SubFrame", ImVec2(0, 80), true);
               ImGui::TextColored(ImVec4(0,1,1,1), u8"المشترك: محمد الشمري (VIP)");
-              ImGui::TextColored(ImVec4(0,1,0,1), u8"البدء: %s | النهاية: %s", g_SubStart.c_str(), g_SubEnd.c_str());
+              ImGui::TextColored(ImVec4(0,1,0,1), u8"حالة الحماية أونلاين: %s", g_OnlineBypass ? "مفعلة 🟢" : "غير مفعلة 🔴");
               ImGui::EndChild();
 
-              if (ImGui::CollapsingHeader(u8"🛡️ إعدادات الحماية والتبليك")) {
-                  ImGui::Checkbox(u8"تفعيل الحماية من اللوحة (Server Bypass)", &g_ServerBypassEnabled);
-                  static bool block_urls = true;
-                  ImGui::Checkbox(u8"حظر روابط الباند (URL Blocker)", &block_urls);
+              if (ImGui::CollapsingHeader(u8"🛡️ إعدادات الحماية (Bypass)")) {
+                  // هذا الزر مربوط مباشرة بمتغير g_BypassEnabled الذي يتحكم بدالة Hook_Connect
+                  ImGui::Checkbox(u8"تفعيل حظر روابط الباند (URL Blocker)", &g_BypassEnabled);
+                  ImGui::TextColored(ImVec4(0.5,0.5,0.5,1), u8"يمنع إرسال تقارير اللعبة للسيرفر");
               }
 
               if (ImGui::CollapsingHeader(u8"👁️ رادار كشف الأماكن (ESP)")) {
@@ -222,8 +253,8 @@ jobs:
                       ImGui::Indent();
                       static bool box, hp, name, skel;
                       ImGui::Checkbox(u8"صندوق اللاعب (2D Box)", &box);
-                      ImGui::Checkbox(u8"شريط الصحة (Health)", &hp);
-                      ImGui::Checkbox(u8"الاسم والمسافة", &name);
+                      ImGui::Checkbox(u8"شريط الصحة (HP)", &hp);
+                      ImGui::Checkbox(u8"الأسماء والمسافة", &name);
                       ImGui::Checkbox(u8"الهيكل العظمي (Skeleton)", &skel);
                       ImGui::Separator();
                       static bool veh, loot;
@@ -233,7 +264,7 @@ jobs:
                   }
               }
 
-              if (ImGui::CollapsingHeader(u8"🎯 الأيمبوت والمميزات")) {
+              if (ImGui::CollapsingHeader(u8"🎯 المميزات القتالية (Combat)")) {
                   static bool recoil=false, aim=false;
                   ImGui::Checkbox(u8"ثبات السلاح 100%", &recoil);
                   ImGui::Checkbox(u8"تثبيت الأيم (Aimbot)", &aim);
@@ -245,68 +276,145 @@ jobs:
           }
 
           // ==========================================
-          // 6. الإقلاع العنيف (قبل شعار الشركة)
+          // 7. محرك الرسم المعدني (Metal Overlay للأيفون)
+          // هذا الجزء يضمن ظهور المنيو فوق اللعبة 100%
           // ==========================================
+          @interface WMasterOverlay : UIViewController <MTKViewDelegate>
+          @property (nonatomic, strong) MTKView *mtkView;
+          @property (nonatomic, strong) id <MTLDevice> device;
+          @property (nonatomic, strong) id <MTLCommandQueue> commandQueue;
+          @end
+
+          @implementation WMasterOverlay
+          - (void)viewDidLoad {
+              [super viewDidLoad];
+              self.view.backgroundColor = [UIColor clearColor];
+              self.view.userInteractionEnabled = YES;
+
+              self.device = MTLCreateSystemDefaultDevice();
+              self.commandQueue = [self.device newCommandQueue];
+
+              self.mtkView = [[MTKView alloc] initWithFrame:self.view.bounds device:self.device];
+              self.mtkView.backgroundColor = [UIColor clearColor];
+              self.mtkView.delegate = self;
+              self.mtkView.framebufferOnly = NO;
+              self.mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0);
+              [self.view addSubview:self.mtkView];
+
+              IMGUI_CHECKVERSION();
+              ImGui::CreateContext();
+              ImGui_ImplMetal_Init(self.device);
+
+              // إخفاء المنيو بـ 3 أصابع
+              UITapGestureRecognizer *tap3 = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleMenu)];
+              tap3.numberOfTouchesRequired = 3;
+              [self.view addGestureRecognizer:tap3];
+          }
+
+          - (void)toggleMenu { g_MenuOpen = !g_MenuOpen; }
+
+          - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+              ImGuiIO& io = ImGui::GetIO();
+              UITouch *touch = [touches anyObject];
+              CGPoint point = [touch locationInView:self.view];
+              io.MousePos = ImVec2(point.x, point.y);
+              io.MouseDown[0] = true;
+          }
+          - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+              ImGuiIO& io = ImGui::GetIO();
+              UITouch *touch = [touches anyObject];
+              CGPoint point = [touch locationInView:self.view];
+              io.MousePos = ImVec2(point.x, point.y);
+          }
+          - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+              ImGuiIO& io = ImGui::GetIO(); io.MouseDown[0] = false;
+          }
+
+          - (void)drawInMTKView:(MTKView *)view {
+              ImGuiIO& io = ImGui::GetIO();
+              io.DisplaySize.x = view.bounds.size.width;
+              io.DisplaySize.y = view.bounds.size.height;
+              
+              MTLRenderPassDescriptor *rpd = view.currentRenderPassDescriptor;
+              if (rpd != nil) {
+                  id <MTLCommandBuffer> cb = [self.commandQueue commandBuffer];
+                  id <MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
+                  
+                  ImGui_ImplMetal_NewFrame(rpd);
+                  ImGui::NewFrame();
+                  RenderDragonUI(); // رسم الواجهة
+                  ImGui::Render();
+                  ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cb, enc);
+                  
+                  [enc endEncoding];
+                  [cb presentDrawable:view.currentDrawable];
+                  [cb commit];
+              }
+          }
+          @end
+
+          // ==========================================
+          // 8. الإقلاع العنيف (حقن الشاشة والهوكات)
+          // ==========================================
+          void StartUI() {
+              sleep(2);
+              dispatch_async(dispatch_get_main_queue(), ^{
+                  UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
+                  if (!mainWindow) mainWindow = [[UIApplication sharedApplication].windows firstObject];
+                  if (mainWindow) {
+                      WMasterOverlay *overlayVC = [[WMasterOverlay alloc] init];
+                      [mainWindow addSubview:overlayVC.view];
+                  }
+              });
+          }
+
           __attribute__((constructor))
           void StartDragon() {
-              thread([]() {
-                  // منع اللعبة من التقدم لمدة ثانية للتأكد من التشغيل الاستباقي
-                  this_thread::sleep_for(chrono::seconds(1));
-                  InstallHooks();
-                  thread(ServerSync).detach();
-                  g_Activated = true; 
-                  g_MenuOpen = true; 
-              }).detach();
+              // 1. تثبيت الهوكات (حظر الروابط)
+              InstallHooks();
+              // 2. تشغيل المزامنة بالخلفية
+              thread(BackgroundSync).detach();
+              // 3. حقن شاشة العرض
+              thread(StartUI).detach();
           }
           EOF
 
       # ========================================================
-      # 2. تجهيز بيئة البناء والتوافقية
+      # تجهيز بيئة البناء وسحب المكاتب
       # ========================================================
       - name: 🛠️ تجهيز Xcode SDK
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      # ========================================================
-      # 3. تحميل المكاتب (حل جذري وموثوق 100%)
-      # ========================================================
-      - name: 🌐 تحميل المكاتب (ImGui, Dobby, Json)
+      - name: 🌐 تحميل المكاتب (ImGui, Dobby, Json, Metal)
         run: |
-          echo "تحميل مكتبة ImGui..."
           git clone --depth 1 https://github.com/ocornut/imgui.git imgui_src
           mkdir -p imgui
           cp imgui_src/*.h imgui_src/*.cpp imgui/
+          cp imgui_src/backends/imgui_impl_metal.h imgui_src/backends/imgui_impl_metal.mm imgui/
 
-          echo "تحميل مكتبة Json..."
           curl -sSL -o json.hpp https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp
           
-          echo "بناء مكتبة Dobby للايفون (مع إجبار المعمارية)..."
           git clone --depth 1 https://github.com/jmpews/Dobby.git dobby_src
           cd dobby_src && mkdir build && cd build
-          
-          # [تصحيح مسعود]: الأوامر الحتمية لبناء Dobby للـ iOS بدون أخطاء
           cmake .. -DDOBBY_GENERATE_SHARED=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT=iphoneos
-          
           make -j4 && cd ../..
           mkdir -p dobby/include dobby/lib
           cp dobby_src/include/dobby.h dobby/include/ && cp dobby_src/build/libdobby.a dobby/lib/
 
       # ========================================================
-      # 4. عملية الصهر الملكية
+      # عملية الصهر (Objective-C++ مع إطار Metal)
       # ========================================================
-      - name: 🔥 عملية الصهر (Objective-C++)
+      - name: 🔥 عملية الصهر
         run: |
           mkdir -p out
           xcrun --sdk iphoneos clang++ -x objective-c++ -arch arm64 -shared -std=c++17 -O3 -fobjc-arc \
-          -I./imgui -I./dobby/include -I. wsam.cpp \
-          imgui/*.cpp -L./dobby/lib -ldobby \
-          -framework Foundation -framework UIKit -framework Metal -framework QuartzCore \
-          -o out/WMASTER_Dragon.dylib
+          -I./imgui -I./dobby/include -I. wsam.mm \
+          imgui/*.cpp imgui/imgui_impl_metal.mm -L./dobby/lib -ldobby \
+          -framework Foundation -framework UIKit -framework Metal -framework MetalKit -framework QuartzCore \
+          -o out/WMASTER_Dragon_V8.dylib
 
-      # ========================================================
-      # 5. رفع الملف الناتج
-      # ========================================================
       - name: 📤 رفع الـ Dylib الأسطوري
         uses: actions/upload-artifact@v4
         with:
-          name: DRAGON-HACK-SHAMMARI
-          path: out/WMASTER_Dragon.dylib
+          name: DRAGON-HACK-SHAMMARI-V8
+          path: out/WMASTER_Dragon_V8.dylib
