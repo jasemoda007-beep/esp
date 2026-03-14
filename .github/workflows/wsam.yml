@@ -20,6 +20,9 @@ jobs:
       - name: 📝 توليد محرك دراكون (wsam.mm)
         run: |
           cat << 'EOF' > wsam.mm
+          // 🛠️ حل خطأ RTLD_DEFAULT الجذري لأبل
+          #define _DARWIN_C_SOURCE 
+          
           #import <Foundation/Foundation.h>
           #import <UIKit/UIKit.h>
           #import <Metal/Metal.h>
@@ -33,6 +36,7 @@ jobs:
           #include <netinet/in.h>
           #include <arpa/inet.h>
           #include <mach-o/dyld.h> 
+          #include <dlfcn.h> // ضروري للهوكات
           #include "imgui.h"
           #include "imgui_impl_metal.h"
           #include "dobby.h"
@@ -42,7 +46,7 @@ jobs:
           using namespace std;
 
           // ==========================================
-          // 1. رابط السيرفر ومعلومات تسجيل الدخول (طلبك الأول)
+          // 1. رابط السيرفر ومعلومات تسجيل الدخول 
           // ==========================================
           const string SERVER_URL = "http://34.204.178.160/panel.php?api=check&key=";
           char g_KeyInput[32] = "SHAMMARI-VIP-16X";
@@ -56,12 +60,12 @@ jobs:
           string g_SubStart = "--/--/----", g_SubEnd = "--/--/----", g_SubType = "VIP";
 
           // ==========================================
-          // 2. إحداثيات خصائص الرادار (طلبك الثاني)
+          // 2. إحداثيات خصائص الرادار (أضف أوفستاتك هنا)
           // ==========================================
           uintptr_t GWORLD_ADDR = 0x11223344; 
           uintptr_t GNAMES_ADDR = 0x55667788; 
 
-          // ضع إحداثيات خصائصك هنا:
+          // ضع إحداثيات الرادار هنا:
           uintptr_t OFF_ACTORS    = 0xA0;    // مصفوفة اللاعبين
           uintptr_t OFF_HEALTH    = 0x988;   // الصحة (الدم)
           uintptr_t OFF_NAME      = 0x640;   // الاسم
@@ -72,28 +76,28 @@ jobs:
           uintptr_t OFF_NO_RECOIL = 0x1A2B3C; // ثبات السلاح
 
           // ==========================================
-          // 3. مكان حظر الروابط مربوط بزر الحماية (طلبك الثالث والرابع)
+          // 3. مكان حظر الروابط مربوط بزر الحماية
           // ==========================================
-          bool g_BypassEnabled = true; // هذا هو زر تفعيل الحماية في المنيو
+          bool g_BypassEnabled = true; // زر تفعيل الحماية في المنيو
           bool g_OnlineBypass = false; // تفعيل الحماية أونلاين من السيرفر
 
-          // قائمة الروابط المحظورة (تضيف الروابط هنا)
+          // قائمة الروابط المحظورة (تضيف الروابط هنا فقط)
           vector<string> BlockedURLs = { 
               "log.cheat-detection.com", 
               "anticheat.pubg.com", 
               "crash-report.tencent.com"
           };
 
-          // هوك اعتراض الشبكة
+          // هوك اعتراض الشبكة (لا يعمل إلا إذا الحماية مفعلة)
           static int (*Orig_Connect)(int, const struct sockaddr*, socklen_t);
           int Hook_Connect(int s, const struct sockaddr* name, socklen_t namelen) {
-              // ⚡ الربط: لا يتم الحظر إلا إذا كان الزر مفعل في المنيو (g_BypassEnabled)
+              // ⚡ الربط: لا يتم الحظر إلا إذا كان الزر مفعل في المنيو أو من السيرفر
               if ((g_BypassEnabled || g_OnlineBypass) && name->sa_family == AF_INET) {
                   struct sockaddr_in* addr = (struct sockaddr_in*)name;
                   char* ip = inet_ntoa(addr->sin_addr);
                   
                   for (const auto& blocked : BlockedURLs) {
-                      // إذا كان الـ IP أو الرابط في القائمة السوداء، نرجع خطأ (تبليك)
+                      // [هنا لوجك الحظر]: إذا كان الـ IP أو الرابط في القائمة السوداء، نرجع خطأ (تبليك)
                       // if (strstr(ip, blocked.c_str())) return -1; 
                   }
               }
@@ -101,10 +105,10 @@ jobs:
           }
 
           // ==========================================
-          // 4. مكان إضافة الهوكات (طلبك الخامس)
+          // 4. مكان إضافة الهوكات 
           // ==========================================
           void InstallHooks() {
-              // تثبيت هوك الشبكة (لتبليك الروابط)
+              // تثبيت هوك الشبكة (لتبليك الروابط) - RTLD_DEFAULT تم حله!
               DobbyHook((void*)dlsym(RTLD_DEFAULT, "connect"), (void*)Hook_Connect, (void**)&Orig_Connect);
               
               // [هنا تستطيع إضافة هوكات أخرى مثل هوك ثبات السلاح]
@@ -125,10 +129,15 @@ jobs:
                           if(res["status"] == "success") {
                               g_Connected = true;
                               g_IsLoggedIn = true; // تم الدخول بنجاح!
-                              g_OnlineBypass = res["online_bypass"].get<bool>(); // تفعيل الحماية أونلاين
+                              
+                              if(res.contains("online_bypass")) {
+                                  g_OnlineBypass = res["online_bypass"].get<bool>();
+                              }
                               
                               // سحب الأوفستات الحية
-                              GWORLD_ADDR = std::stoull(res["offsets"]["gworld"].get<string>(), 0, 16);
+                              if(res.contains("offsets")) {
+                                  GWORLD_ADDR = std::stoull(res["offsets"]["gworld"].get<string>(), 0, 16);
+                              }
                           }
                       } catch(...) { g_Connected = false; }
                   } else { g_Connected = false; }
@@ -173,14 +182,14 @@ jobs:
               ApplyPremiumTheme();
 
               // --- 1. الشريط العلوي (HUD) ---
-              // طلبك السادس: الشريط الفوق عند النقر عليه يحدث (Refresh on click)
+              // الشريط الفوق عند النقر عليه يحدث (Refresh on click)
               ImGui::SetNextWindowPos(ImVec2(0,0)); 
               ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, 35));
               ImGui::Begin("HUD", 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground);
               
               // زر شفاف بعرض الشاشة (عند النقر يصفر الاتصال للتحديث الفوري)
               if(ImGui::InvisibleButton("REFRESH_HUD", ImVec2(ImGui::GetIO().DisplaySize.x, 35))) {
-                  g_Connected = false; // تصفير الحالة لإجبار BackgroundSync على العمل فوراً
+                  g_Connected = false; 
               }
               
               // رسم اللمبة التي تضوي (أخضر متصل، أحمر غير متصل)
@@ -189,7 +198,7 @@ jobs:
               string status_text;
               
               if (g_Connected) {
-                  led_col = IM_COL32(0, 255, 102, (int)(150 + pulse * 105)); // أخضر نابض
+                  led_col = IM_COL32(0, 255, 102, (int)(150 + pulse * 105)); // أخضر يلمض
                   status_text = "متصل (Live)";
               } else {
                   led_col = IM_COL32(255, 51, 102, 255); // أحمر ثابت
@@ -207,7 +216,6 @@ jobs:
               if(!g_MenuOpen) return;
 
               // --- 2. لوحة اللوكن (Login) الجميلة ---
-              // طلبك السابع: لوحة لوكن مربوطة بأكواد من السيرفر
               if (!g_IsLoggedIn) {
                   ImGui::SetNextWindowSize(ImVec2(320, 240), ImGuiCond_Always);
                   ImGui::Begin(u8"تسجيل الدخول | W-MASTER", &g_MenuOpen, ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoResize);
@@ -277,7 +285,6 @@ jobs:
 
           // ==========================================
           // 7. محرك الرسم المعدني (Metal Overlay للأيفون)
-          // هذا الجزء يضمن ظهور المنيو فوق اللعبة 100%
           // ==========================================
           @interface WMasterOverlay : UIViewController <MTKViewDelegate>
           @property (nonatomic, strong) MTKView *mtkView;
@@ -305,7 +312,6 @@ jobs:
               ImGui::CreateContext();
               ImGui_ImplMetal_Init(self.device);
 
-              // إخفاء المنيو بـ 3 أصابع
               UITapGestureRecognizer *tap3 = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleMenu)];
               tap3.numberOfTouchesRequired = 3;
               [self.view addGestureRecognizer:tap3];
@@ -330,6 +336,11 @@ jobs:
               ImGuiIO& io = ImGui::GetIO(); io.MouseDown[0] = false;
           }
 
+          // 🛠️ تم حل تحذير أبل (MTKViewDelegate) بإضافة هذه الدالة الفارغة
+          - (void)mtkView:(nonnull MTKView *)view drawableSizeWillChange:(CGSize)size {
+              // لا نحتاج لأي أمر هنا، هي فقط لإسكات تحذير أبل.
+          }
+
           - (void)drawInMTKView:(MTKView *)view {
               ImGuiIO& io = ImGui::GetIO();
               io.DisplaySize.x = view.bounds.size.width;
@@ -342,7 +353,7 @@ jobs:
                   
                   ImGui_ImplMetal_NewFrame(rpd);
                   ImGui::NewFrame();
-                  RenderDragonUI(); // رسم الواجهة
+                  RenderDragonUI(); 
                   ImGui::Render();
                   ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cb, enc);
                   
@@ -359,8 +370,26 @@ jobs:
           void StartUI() {
               sleep(2);
               dispatch_async(dispatch_get_main_queue(), ^{
-                  UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
-                  if (!mainWindow) mainWindow = [[UIApplication sharedApplication].windows firstObject];
+                  // 🛠️ تم حل تحذير أبل القديم للـ window، هذه الطريقة الحديثة لـ iOS 15+
+                  UIWindow *mainWindow = nil;
+                  for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                      if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+                          UIWindowScene *windowScene = (UIWindowScene *)scene;
+                          for (UIWindow *window in windowScene.windows) {
+                              if (window.isKeyWindow) {
+                                  mainWindow = window;
+                                  break;
+                              }
+                          }
+                      }
+                      if (mainWindow) break;
+                  }
+                  
+                  // طريقة الطوارئ للأجهزة القديمة
+                  if (!mainWindow) {
+                      mainWindow = [[UIApplication sharedApplication].windows firstObject];
+                  }
+
                   if (mainWindow) {
                       WMasterOverlay *overlayVC = [[WMasterOverlay alloc] init];
                       [mainWindow addSubview:overlayVC.view];
