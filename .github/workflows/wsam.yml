@@ -22,7 +22,7 @@ jobs:
         sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
     # 3. السحر هنا: تحميل ImGui و Dobby و JSON تلقائياً
-    - name: 🌐 تحميل المكتبات الناقصة (ImGui, Dobby, Json)
+    - name: 🌐 تحميل المكتبات الناقصة (ImGui, Dobby, Json, Curl for iOS)
       run: |
         echo "جاري تحميل مكتبة json.hpp..."
         curl -O https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp
@@ -52,10 +52,18 @@ jobs:
         cp dobby_src/include/dobby.h dobby/include/
         cp dobby_src/build/libdobby.a dobby/lib/
         
-    # 4. تثبيت Curl للماك
-    - name: 📦 تثبيت مكتبة Curl
-      run: |
-        brew install curl
+        echo "جاري تحميل مكتبة Curl المخصصة لـ iOS..."
+        # نحمل نسخة جاهزة من Curl للايفون (من مستودع موثوق)
+        git clone https://github.com/sinofool/build-libcurl-ios.git curl_ios
+        cd curl_ios
+        ./build.sh
+        cd ..
+        # نقل ملفات الـ Headers والمكتبة الثابتة لمكان واضح
+        mkdir -p curl/include/curl curl/lib
+        cp -r curl_ios/curl-ios-build/include/curl/* curl/include/curl/
+        cp curl_ios/curl-ios-build/lib/libcurl.a curl/lib/
+
+    # 4. (تم حذف خطوة تثبيت brew curl لأننا استخدمنا النسخة المخصصة للايفون فوق)
 
     # 5. عملية الصهر والدمج
     - name: 🔥 دمج الكود وصناعة الـ Dylib
@@ -63,15 +71,15 @@ jobs:
         echo "بدأ عملية الصهر العنيفة..."
         mkdir -p build_output
         
-        # أمر الترجمة للايفون
+        # أمر الترجمة للايفون (مع إضافة مسارات Curl الجديدة)
         xcrun --sdk iphoneos clang++ -arch arm64 -shared \
         -std=c++17 -O3 -fobjc-arc \
-        -I./imgui -I./dobby/include -I. -I/usr/local/include \
+        -I./imgui -I./dobby/include -I./curl/include -I. \
         wsam.cpp \
         ./imgui/imgui.cpp ./imgui/imgui_draw.cpp ./imgui/imgui_widgets.cpp ./imgui/imgui_tables.cpp \
         -L./dobby/lib -ldobby \
+        -L./curl/lib -lcurl \
         -framework Foundation -framework UIKit -framework Metal -framework QuartzCore \
-        -lcurl \
         -o build_output/WMASTER_Shammari.dylib
         
         echo "✅ تمت عملية الصهر بنجاح! ملف Dylib جاهز."
