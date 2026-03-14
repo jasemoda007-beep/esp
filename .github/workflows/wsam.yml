@@ -1,45 +1,37 @@
 name: 🦅 W-MASTER Dylib Builder
 
-# متى يشتغل هذا السكربت؟ 
-# يشتغل تلقائياً أول ما تسوي Push (رفع) لأي تعديل على الكود مالتك
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # يخليك تكدر تشغله يدوياً من واجهة GitHub
+  workflow_dispatch: 
 
 jobs:
   build_dylib:
     name: طبخ حماية محمد الشمري (iOS)
-    runs-on: macos-latest # نستخدم سيرفر ماك لأننا نبرمج للايفون
+    runs-on: macos-latest
 
     steps:
-    # 1. سحب الكود مالتك من الريبو
     - name: 📥 جلب ملفات المشروع
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4 # تم التحديث إلى v4
       with:
-        submodules: recursive # جلب مكتبات ImGui و Dobby إذا كانت Submodules
+        submodules: recursive 
 
-    # 2. تجهيز بيئة التطوير (Xcode و Clang)
     - name: 🛠️ تجهيز أدوات بناء الايفون (SDK)
       run: |
         echo "جاري تجهيز بيئة حماية محمد الشمري..."
         sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
         
-    # 3. تثبيت المكتبات الخارجية المطلوبة (مثل Curl للاتصال باللوحة)
     - name: 📦 تثبيت مكتبة Curl و Json
       run: |
         brew install curl
-        brew install nlohmann-json # مكتبة json.hpp اللي استخدمناها بالكود
+        brew install nlohmann-json 
 
-    # 4. عملية الصهر (Compile) - تحويل الـ C++ إلى .dylib
     - name: 🔥 دمج الكود وصناعة الـ Dylib
       run: |
         echo "بدأ عملية الصهر..."
-        
-        # إنشاء مجلد للمخرجات
         mkdir -p build_output
         
-        # أمر الترجمة العنيف (Clang) للايفون (arm64)
+        # أمر الترجمة (نفسه بدون تغيير لأن الكود نظيف 100%)
         xcrun --sdk iphoneos clang++ -arch arm64 -shared \
         -std=c++17 -O3 -fobjc-arc \
         -I./imgui -I./dobby/include -I/usr/local/include \
@@ -52,9 +44,9 @@ jobs:
         
         echo "✅ تمت عملية الصهر بنجاح! ملف Dylib جاهز."
 
-    # 5. رفع الملف الناتج (Artifact) حتى تكدر تحمله
+    # 🚀 هنا كان الخطأ، تم التحديث إلى v4
     - name: 📤 رفع ملف الـ Dylib الجاهز للتحميل
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4 
       with:
         name: WMASTER-Shammari-iOS
         path: build_output/WMASTER_Shammari.dylib
