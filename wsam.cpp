@@ -1,13 +1,12 @@
+#import <Foundation/Foundation.h> // ⬅️ السلاح السري للاتصال بالايفون بدون Curl
 #include <iostream>
 #include <string>
 #include <thread>
 #include <chrono>
 #include <vector>
 
-// المكتبات المطلوبة للـ Dylib (يجب توفرها في بيئة البناء)
 #include "imgui.h"
 #include "dobby.h"
-#include "curl/curl.h"
 #include "json.hpp" // nlohmann/json
 using json = nlohmann::json;
 using namespace std;
@@ -21,7 +20,7 @@ bool g_MenuOpen = true;
 bool g_IsLoggedIn = false;
 bool g_IsConnected = false;
 bool g_ShowSuccessMsg = false;
-char g_LicenseKey[64] = "SHAMMARI-VIP-2026"; // 16 حرف
+char g_LicenseKey[64] = "SHAMMARI-VIP-2026"; 
 
 bool g_ServerFrozen = false;
 string g_FreezeMessage = "";
@@ -29,77 +28,95 @@ string g_SubStartDate = "14/03/2026";
 string g_SubEndDate = "14/04/2026";
 string g_SubType = "VIP 💎";
 
-// ==========================================
-// 2. إعدادات المنيو (التفعيلات)
-// ==========================================
+// إعدادات المنيو
 bool g_AngosBypass = true;
 bool g_ESP_Players = true;
 bool g_ESP_Box = true;
 bool g_ESP_Health = true;
 bool g_ESP_Skeleton = true;
 bool g_ESP_Name = true;
-bool g_ESP_Vehicles = false; // السيارات
-bool g_ESP_Loot = false;     // الموارد والأسلحة
+bool g_ESP_Vehicles = false; 
+bool g_ESP_Loot = false;     
+
+// أوفستات الرادار (تتحدث من السيرفر)
+uintptr_t g_AngosOffset = 0x0;
+uintptr_t g_GWorldOffset = 0x11223344; 
+uintptr_t g_GNamesOffset = 0x55667788; 
 
 // ==========================================
-// 3. أوفستات الرادار (Unreal Engine Offsets)
+// 2. نظام Hooking (تخطي الحماية)
 // ==========================================
-// [تحديث]: هذه الأوفستات تتحدث من السيرفر أو تدوياً هنا
-uintptr_t OFFSET_GWORLD    = 0x11223344; // خريطة العالم
-uintptr_t OFFSET_GNAMES    = 0x55667788; // الأسماء
-uintptr_t OFFSET_GOBJECTS  = 0x99AABBCC; // الكائنات (الأشياء)
-
-// أوفستات داخلية (Offsets inside classes) - تتحدث من هنا
-uintptr_t OFF_GAME_INSTANCE = 0x180; // OwningGameInstance
-uintptr_t OFF_LOCAL_PLAYERS = 0x38;  // LocalPlayers
-uintptr_t OFF_PLAYER_CONTROLLER = 0x30; // PlayerController
-uintptr_t OFF_PLAYER_CAMERA = 0x340; // PlayerCameraManager
-uintptr_t OFF_ULEVEL = 0x30; // ULevel
-uintptr_t OFF_AACTORS = 0xA0; // Actors Array
-
-// ==========================================
-// 4. هوكات الحماية (Security Hooks)
-// ==========================================
-// [تحديث]: هذه الأوفستات لدوال الحماية في ملف اللعبة (أو angos)
-uintptr_t OFFSET_SEND_REPORT = 0x1A2B3C; // دالة إرسال تقرير الباند
-uintptr_t OFFSET_MEMORY_CHECK = 0x4D5E6F; // دالة فحص الذاكرة
-
-// 1. هوك تعطيل الإبلاغات (Anti-Report)
-static void* (*Original_SendReport)(void* url, void* data);
-void* Replacement_SendReport(void* url, void* data) {
+static int (*Original_SecurityCheck)();
+int Replacement_SecurityCheck() {
     if (g_AngosBypass && g_IsConnected) {
-        return nullptr; // 🔴 تعطيل إرسال التقرير (آمن)
+        return 1; // تخطي الحماية (آمن)
     }
-    return Original_SendReport(url, data); // تشغيل طبيعي
+    return Original_SecurityCheck();
 }
 
-// 2. هوك تعطيل فحص الذاكرة (Memory Bypass)
-static int (*Original_MemoryCheck)();
-int Replacement_MemoryCheck() {
-    if (g_AngosBypass && g_IsConnected) {
-        return 1; // 1 = آمن ولا يوجد تعديل
-    }
-    return Original_MemoryCheck();
-}
-
-// دالة تثبيت الهوكات (تعمل في بداية التشغيل)
 void InstallSecurityHooks() {
-    // uintptr_t base_addr = _dyld_get_image_vmaddr_slide(0);
-    // DobbyHook((void*)(base_addr + OFFSET_SEND_REPORT), (void*)Replacement_SendReport, (void**)&Original_SendReport);
-    // DobbyHook((void*)(base_addr + OFFSET_MEMORY_CHECK), (void*)Replacement_MemoryCheck, (void**)&Original_MemoryCheck);
+    // سيتم التثبيت بناءً على الأوفست القادم من السيرفر
 }
 
 // ==========================================
-// 5. محرك رسم الرادار (Full ESP Engine)
+// 3. الاتصال بلوحة التحكم (Apple Native API)
 // ==========================================
-
-// دالة (وهمية للتوضيح) لتحويل إحداثيات اللعبة 3D إلى شاشة 2D
-bool WorldToScreen(ImVec3 worldPos, ImVec2* screenPos) {
-    // كود مصفوفة الكاميرا يوضع هنا
-    return true; 
+uintptr_t HexToUint(string hex_str) {
+    return std::stoull(hex_str, nullptr, 16);
 }
 
-// أ. رسم اللاعبين (الدم، البوكس، الهيكل، الاسم)
+void ForceRefreshConnection() { g_IsConnected = false; }
+
+// خيط الاتصال بالسيرفر باستخدام مكتبات الايفون الأصلية (بدون الحاجة لـ Curl نهائياً)
+void ServerThread() {
+    while(true) {
+        if(g_IsLoggedIn && string(g_LicenseKey).length() >= 10) {
+            string url_str = SERVER_URL + string(g_LicenseKey);
+            
+            @autoreleasepool {
+                NSURL *nsUrl = [NSURL URLWithString:[NSString stringWithUTF8String:url_str.c_str()]];
+                NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:nsUrl cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5.0];
+                [request setHTTPMethod:@"GET"];
+                
+                dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+                __block string readBuffer = "";
+                __block bool success = false;
+                
+                NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                    if (error == nil && data != nil) {
+                        readBuffer = string((char*)[data bytes], [data length]);
+                        success = true;
+                    }
+                    dispatch_semaphore_signal(semaphore);
+                }];
+                [task resume];
+                dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+                
+                if(success) {
+                    try {
+                        auto res_json = json::parse(readBuffer);
+                        if (res_json["server_state"] == "danger") {
+                            g_ServerFrozen = true; g_IsConnected = false;
+                            if(res_json.contains("message")) g_FreezeMessage = res_json["message"].get<std::string>();
+                        } else if (res_json["status"] == "success") {
+                            g_ServerFrozen = false; g_IsConnected = true;
+                            if(res_json.contains("offsets")) {
+                                g_AngosOffset = HexToUint(res_json["offsets"]["angos_offset"].get<std::string>());
+                                g_GWorldOffset = HexToUint(res_json["offsets"]["gworld_offset"].get<std::string>());
+                                g_GNamesOffset = HexToUint(res_json["offsets"]["gnames_offset"].get<std::string>());
+                            }
+                        } else { g_IsConnected = false; }
+                    } catch (...) { g_IsConnected = false; }
+                } else { g_IsConnected = false; }
+            }
+        }
+        this_thread::sleep_for(chrono::seconds(5)); 
+    }
+}
+
+// ==========================================
+// 4. محرك رسم الرادار (Full ESP Engine)
+// ==========================================
 void DrawPlayerESP(ImDrawList* draw, ImVec2 head, ImVec2 foot, float hp, string name, float dist) {
     float height = foot.y - head.y;
     float width = height / 2.0f;
@@ -107,8 +124,8 @@ void DrawPlayerESP(ImDrawList* draw, ImVec2 head, ImVec2 foot, float hp, string 
     ImVec2 bottom_right = ImVec2(head.x + width / 2, foot.y);
 
     if (g_ESP_Box) {
-        draw->AddRect(top_left, bottom_right, IM_COL32(0, 0, 0, 255), 0, 0, 2.5f); // ظل
-        draw->AddRect(top_left, bottom_right, IM_COL32(0, 229, 255, 255), 0, 0, 1.5f); // سيان
+        draw->AddRect(top_left, bottom_right, IM_COL32(0, 0, 0, 255), 0, 0, 2.5f);
+        draw->AddRect(top_left, bottom_right, IM_COL32(0, 229, 255, 255), 0, 0, 1.5f);
     }
 
     if (g_ESP_Health) {
@@ -125,47 +142,26 @@ void DrawPlayerESP(ImDrawList* draw, ImVec2 head, ImVec2 foot, float hp, string 
         draw->AddText(ImVec2(tp.x+1, tp.y+1), IM_COL32(0,0,0,255), t.c_str());
         draw->AddText(tp, IM_COL32(255,255,255,255), t.c_str());
     }
-
-    if (g_ESP_Skeleton) {
-        // [تحديث العظام من هنا]: استخراج Bone Matrix
-        // رسم الرقبة، الصدر، الأكتاف، الأيدي، الأقدام.
-        // draw->AddLine(NeckPos, ChestPos, IM_COL32(255, 255, 255, 255), 1.0f);
-    }
 }
 
-// ب. رسم السيارات (Vehicles)
 void DrawVehicleESP(ImDrawList* draw, ImVec2 pos, string vehName, float dist) {
     if (!g_ESP_Vehicles) return;
     string t = "🚗 " + vehName + " [" + to_string((int)dist) + "m]";
     ImVec2 tp = ImVec2(pos.x - (ImGui::CalcTextSize(t.c_str()).x / 2), pos.y);
     draw->AddText(ImVec2(tp.x+1, tp.y+1), IM_COL32(0,0,0,255), t.c_str());
-    draw->AddText(tp, IM_COL32(255, 165, 0, 255), t.c_str()); // برتقالي للسيارات
+    draw->AddText(tp, IM_COL32(255, 165, 0, 255), t.c_str());
 }
 
-// ج. رسم الموارد والأسلحة (Loot & Weapons)
 void DrawLootESP(ImDrawList* draw, ImVec2 pos, string itemName, float dist) {
     if (!g_ESP_Loot) return;
     string t = "🔫 " + itemName + " [" + to_string((int)dist) + "m]";
     ImVec2 tp = ImVec2(pos.x - (ImGui::CalcTextSize(t.c_str()).x / 2), pos.y);
     draw->AddText(ImVec2(tp.x+1, tp.y+1), IM_COL32(0,0,0,255), t.c_str());
-    draw->AddText(tp, IM_COL32(255, 255, 0, 255), t.c_str()); // أصفر للموارد
+    draw->AddText(tp, IM_COL32(255, 255, 0, 255), t.c_str());
 }
 
-// الدالة الرئيسية لرسم كل الـ ESP
 void RenderESP() {
     ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
-
-    // 1. [جلب GWorld]
-    // uintptr_t uWorld = *(uintptr_t*)(base_addr + g_GWorldOffset);
-    // if (!uWorld) return;
-    
-    // 2. [جلب المصفوفة AActor]
-    // Loop over actors...
-    // if (actor is Player) -> DrawPlayerESP(...)
-    // if (actor is Vehicle) -> DrawVehicleESP(...)
-    // if (actor is Weapon/Loot) -> DrawLootESP(...)
-
-    // -- (رسم وهمي للمحاكاة) --
     if (g_ESP_Players) {
         ImVec2 c = ImVec2(ImGui::GetIO().DisplaySize.x/2, ImGui::GetIO().DisplaySize.y/2);
         DrawPlayerESP(draw_list, ImVec2(c.x+100, c.y-100), ImVec2(c.x+100, c.y+50), 75, "Enemy_1", 120);
@@ -175,43 +171,7 @@ void RenderESP() {
 }
 
 // ==========================================
-// 6. الاتصال باللوحة (API)
-// ==========================================
-static size_t WriteCallback(void *c, size_t s, size_t n, void *u) { ((string*)u)->append((char*)c, s*n); return s*n; }
-void ForceRefreshConnection() { g_IsConnected = false; }
-
-void ServerThread() {
-    CURL *curl; CURLcode res;
-    while(true) {
-        if(g_IsLoggedIn && string(g_LicenseKey).length() >= 10) {
-            curl = curl_easy_init();
-            if(curl) {
-                string url = SERVER_URL + string(g_LicenseKey);
-                string readBuffer;
-                curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-                curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-                curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-                res = curl_easy_perform(curl);
-                if(res == CURLE_OK) {
-                    try {
-                        auto response = json::parse(readBuffer);
-                        if (response["server_state"] == "danger") {
-                            g_ServerFrozen = true; g_IsConnected = false;
-                        } else if (response["status"] == "success") {
-                            g_ServerFrozen = false; g_IsConnected = true;
-                            // تحديث أوفستات GWorld و Angos من السيرفر
-                        } else { g_IsConnected = false; }
-                    } catch (...) { g_IsConnected = false; }
-                } else { g_IsConnected = false; }
-                curl_easy_cleanup(curl);
-            }
-        }
-        this_thread::sleep_for(chrono::seconds(5)); 
-    }
-}
-
-// ==========================================
-// 7. واجهة ImGui (VIP Theme)
+// 5. واجهة ImGui (VIP Theme)
 // ==========================================
 void ToggleButton(const char* str_id, bool* v) {
     ImVec2 p = ImGui::GetCursorScreenPos(); ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -241,7 +201,7 @@ void RenderWMASTER_UI() {
         ImGui::Begin("Frozen", nullptr, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoBackground);
         ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(0,0), ImGui::GetIO().DisplaySize, IM_COL32(0,0,0,255));
         ImGui::SetCursorPos(ImVec2(ImGui::GetWindowSize().x/2 - 100, ImGui::GetWindowSize().y/2));
-        ImGui::TextColored(ImVec4(1,0,0,1), "النظام تحت الصيانة - الشمري");
+        ImGui::TextColored(ImVec4(1,0,0,1), "%s", g_FreezeMessage.c_str());
         ImGui::End(); return; 
     }
 
@@ -260,10 +220,8 @@ void RenderWMASTER_UI() {
     ImGui::SetCursorPos(ImVec2(ImGui::GetIO().DisplaySize.x/2 - 60, 10)); ImGui::TextColored(ImVec4(0.5f,0.5f,0.5f,1), "W-MASTER V3");
     ImGui::End();
 
-    // رسم الرادار إذا متصل
     if (g_IsConnected) RenderESP();
 
-    // المنيو
     if (!g_MenuOpen) return;
 
     ImGui::SetNextWindowSize(ImVec2(360, 550), ImGuiCond_FirstUseEver);
@@ -305,20 +263,15 @@ void RenderWMASTER_UI() {
 
         ImGui::Spacing();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0,0.5f,0.8f,0.3f));
-        if (ImGui::Button(u8"✈️ المطور: محمد الشمري (اضغط للتليكرام)", ImVec2(-1, 35))) {
-            // كود فتح التليكرام هنا
-        }
+        if (ImGui::Button(u8"✈️ المطور: محمد الشمري (اضغط للتليكرام)", ImVec2(-1, 35))) { }
         ImGui::PopStyleColor();
     }
     ImGui::End();
 }
 
-// ==========================================
-// 8. نقطة الإقلاع (Main Init)
-// ==========================================
 __attribute__((constructor))
 void InitWMASTER() {
-    InstallSecurityHooks(); // زرع هوكات الحماية أولاً
-    thread server_monitor(ServerThread); // تشغيل الاتصال
+    InstallSecurityHooks(); 
+    thread server_monitor(ServerThread); 
     server_monitor.detach();
 }
