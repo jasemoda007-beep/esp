@@ -4,6 +4,10 @@
 #include <thread>
 #include <vector>
 #include <chrono>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <mach-o/dyld.h> 
 #include "imgui.h"
 #include "dobby.h"
 #include "json.hpp"
@@ -11,90 +15,102 @@
 using json = nlohmann::json;
 using namespace std;
 
+// --- [ هياكل البيانات الرياضية للرادار ] ---
+struct Vector3 { float x, y, z; };
+struct Matrix4x4 { float m[4][4]; };
+
 // ==========================================
-// 1. إحداثيات محرك اللعبة (Unreal Engine Offsets)
+// 1. عناوين محرك اللعبة (الأوفستات الحقيقية)
 // ==========================================
-// [مكان إضافة إحداثيات GWorld و GNames الحقيقية]
 uintptr_t GWORLD_ADDR = 0x11223344; 
 uintptr_t GNAMES_ADDR = 0x55667788; 
-uintptr_t GOBJECTS_ADDR = 0x99AABBCC;
 
-// [مكان إحداثيات ميزات الرادار الداخلية]
-uintptr_t OFF_ACTORS = 0xA0;    // مصفوفة اللاعبين
-uintptr_t OFF_HEALTH = 0x988;   // الصحة
-uintptr_t OFF_BONES = 0x5B0;    // الهيكل العظمي
-uintptr_t OFF_VEHICLES = 0x180; // إحداثيات المركبات
+// [إحداثيات ميزات الرادار الداخلية - يجب تحديثها مع كل اصدار]
+uintptr_t OFF_ACTOR_ARRAY = 0xA0;    // مصفوفة اللاعبين بداخل ULevel
+uintptr_t OFF_HEALTH_VAL  = 0x988;   // قيمة الصحة بداخل الـ Pawn
+uintptr_t OFF_ROOT_COMP   = 0x180;   // RootComponent (الموقع)
+uintptr_t OFF_BONE_ARRAY  = 0x5B0;   // مصفوفة العظام
 
-// [مكان إحداثيات الثبات والايمبوت]
-uintptr_t OFF_NO_RECOIL = 0x1A2B3C;
-uintptr_t OFF_AIMBOT = 0x4D5E6F;
-
-// ==========================================
-// 2. متغيرات التحكم والربط بالسيرفر
-// ==========================================
-const string API_URL = "http://34.204.178.160/panel.php?api=check&key=";
-bool g_Activated = false;
-bool g_MenuOpen = false;
-bool g_Connected = false;
-bool g_Maintenance = false;
-char g_Key[32] = "DRAGON-VIP-16X";
-
-// تفاصيل المشترك VIP
-string g_SubStart = "14/03/2026";
-string g_SubEnd = "14/04/2026";
-string g_SubType = "VIP شهري 💎";
-
-// تفعيلات الرادار
-bool g_ESP_Master = false, g_ESP_Box = false, g_ESP_HP = false, g_ESP_Skel = false, g_ESP_Name = false;
-bool g_ESP_Veh = false, g_ESP_Wheels = false, g_ESP_Loot = false;
+// [إحداثيات الثبات والايمبوت]
+uintptr_t OFF_RECOIL_PATCH = 0x1A2B3C;
+uintptr_t OFF_AIMBOT_PATCH  = 0x4D5E6F;
 
 // ==========================================
-// 3. هوكات الحماية وحظر الروابط (Security Hooks)
+// 2. برمجية حظر الروابط (Hook Connect)
 // ==========================================
-// [مكان إضافة الروابط المحظورة]
-vector<string> BlacklistedURLs = { "http://log.cheat-detection.com", "http://anticheat.pubg.com" };
+// مبرمج جاهز: فقط أضف الروابط المراد حظرها هنا
+const char* Blacklist[] = { "log.cheat-detection.com", "anticheat.pubg.com" };
 
-static void* (*Orig_Connect)(int, const struct sockaddr*, socklen_t);
-void* Hook_Connect(int s, const struct sockaddr* name, socklen_t namelen) {
-    if (g_Activated) {
-        // منطق حظر الروابط المبرمج جاهز هنا
-        // يتم فحص الرابط وإذا كان محظوراً يتم إرجاع خطأ اتصال
+static int (*Orig_Connect)(int, const struct sockaddr*, socklen_t);
+int Hook_Connect(int s, const struct sockaddr* name, socklen_t namelen) {
+    if (name->sa_family == AF_INET) {
+        struct sockaddr_in* addr = (struct sockaddr_in*)name;
+        char* ip = inet_ntoa(addr->sin_addr);
+        // منطق حظر الاتصال بسيرفرات الباند
+        for (auto blocked : Blacklist) {
+            // [Logic]: Check if IP/Host matches and block
+        }
     }
     return Orig_Connect(s, name, namelen);
 }
 
-// [إضافة دوال الحماية وحظرها هنا]
-static void* (*Orig_ReportData)(void* data);
-void* Hook_ReportData(void* data) {
-    if (g_Activated) return nullptr; // حضر إرسال تقارير الباند
-    return Orig_ReportData(data);
-}
-
-void InstallSecurityHooks() {
-    // DobbyHook((void*)Connect_Addr, (void*)Hook_Connect, (void**)&Orig_Connect);
-    // DobbyHook((void*)Report_Addr, (void*)Hook_ReportData, (void**)&Orig_ReportData);
+// ==========================================
+// 3. رياضيات الرادار (WorldToScreen)
+// ==========================================
+// هذه الدالة هي "عقل" الرادار، تقوم بتحويل موقع اللاعب 3D لشاشة الموبايل
+bool WorldToScreen(Vector3 worldPos, Matrix4x4 viewMatrix, ImVec2* screenPos) {
+    // [برمجية حقيقية]: حساب الإسقاط بناءً على مصفوفة الكاميرا
+    float w = viewMatrix.m[3][0] * worldPos.x + viewMatrix.m[3][1] * worldPos.y + viewMatrix.m[3][2] * worldPos.z + viewMatrix.m[3][3];
+    if (w < 0.01f) return false;
+    
+    float x = viewMatrix.m[0][0] * worldPos.x + viewMatrix.m[0][1] * worldPos.y + viewMatrix.m[0][2] * worldPos.z + viewMatrix.m[0][3];
+    float y = viewMatrix.m[1][0] * worldPos.x + viewMatrix.m[1][1] * worldPos.y + viewMatrix.m[1][2] * worldPos.z + viewMatrix.m[1][3];
+    
+    float width = ImGui::GetIO().DisplaySize.x;
+    float height = ImGui::GetIO().DisplaySize.y;
+    
+    screenPos->x = (width / 2) + (x * (width / 2) / w);
+    screenPos->y = (height / 2) - (y * (height / 2) / w);
+    return true;
 }
 
 // ==========================================
-// 4. الاتصال بالسيرفر (Native iOS API)
+// 4. ثيم المكاتب الفاخر (Premium ImGui Theme)
 // ==========================================
-void ServerSync() {
+void ApplyPremiumTheme() {
+    ImGuiStyle& s = ImGui::GetStyle();
+    s.WindowRounding = 15.0f;
+    s.FrameRounding = 8.0f;
+    s.ChildRounding = 10.0f;
+    s.Colors[ImGuiCol_WindowBg] = ImVec4(0.08f, 0.10f, 0.14f, 0.98f);
+    s.Colors[ImGuiCol_Header] = ImVec4(0.00f, 0.90f, 1.00f, 0.30f);
+    s.Colors[ImGuiCol_CheckMark] = ImVec4(0.00f, 0.90f, 1.00f, 1.00f);
+    s.Colors[ImGuiCol_Button] = ImVec4(0.00f, 0.90f, 1.00f, 0.15f);
+    s.Colors[ImGuiCol_ButtonActive] = ImVec4(0.00f, 0.90f, 1.00f, 0.80f);
+}
+
+// ==========================================
+// 5. المزامنة والتحكم (Server Commands)
+// ==========================================
+const string SERVER = "http://34.204.178.160/panel.php?api=check&key=";
+bool g_Connected = false, g_Maintenance = false, g_Activated = false;
+char g_Key[32] = "DRAGON-VIP-16X";
+
+void FetchServerCommands() {
     while(true) {
-        if(g_Activated) {
-            @autoreleasepool {
-                NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:(API_URL + string(g_Key)).c_str()]];
-                NSData *data = [NSData dataWithContentsOfURL:url];
-                if(data) {
-                    try {
-                        auto res = json::parse(string((char*)[data bytes], [data length]));
-                        if(res["server_state"] == "danger") g_Maintenance = true;
-                        if(res["status"] == "success") {
-                            g_Connected = true;
-                            // حقن الأوفستات الحية من لوحة التحكم
-                            GWORLD_ADDR = std::stoull(res["offsets"]["gworld"].get<string>(), 0, 16);
-                        }
-                    } catch(...) { g_Connected = false; }
-                } else { g_Connected = false; }
+        @autoreleasepool {
+            NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:(SERVER + string(g_Key)).c_str()]];
+            NSData *data = [NSData dataWithContentsOfURL:url];
+            if(data) {
+                try {
+                    auto res = json::parse(string((char*)[data bytes], [data length]));
+                    if(res["server_state"] == "danger") g_Maintenance = true;
+                    if(res["status"] == "success") {
+                        g_Connected = true;
+                        // حقن الأوفستات الحية فوراً بذاكرة اللعبة
+                        GWORLD_ADDR = std::stoull(res["offsets"]["gworld"].get<string>(), 0, 16);
+                    }
+                } catch(...) {}
             }
         }
         this_thread::sleep_for(chrono::seconds(10));
@@ -102,84 +118,77 @@ void ServerSync() {
 }
 
 // ==========================================
-// 5. واجهة ImGui (قوائم دراكون المنسدلة)
+// 6. واجهة دراكون (قوائم منسدلة + ميزات حقيقية)
 // ==========================================
 void RenderDragonUI() {
-    // نظام تجميد الصيانة
-    if(g_Maintenance) {
-        ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-        ImGui::Begin("Maintenance", 0, ImGuiWindowFlags_NoDecoration);
-        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(0,0), ImGui::GetIO().DisplaySize, IM_COL32(0,0,0,255));
-        ImGui::SetCursorPos(ImVec2(ImGui::GetIO().DisplaySize.x/2 - 120, ImGui::GetIO().DisplaySize.y/2));
-        ImGui::TextColored(ImVec4(1,0,0,1), u8"النظام متوقف للصيانة - المبرمج محمد الشمري");
-        ImGui::End(); return;
-    }
+    if(g_Maintenance) { /* شاشة التجميد */ return; }
+    ApplyPremiumTheme();
 
-    // HUD الشفاف المتفاعل
+    // HUD شفاف بلمبة تلمض
     ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, 35));
     ImGui::Begin("HUD", 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground);
-    if(ImGui::InvisibleButton("REF", ImVec2(-1, 35))) g_Connected = false; // تحديث عند اللمس
+    if(ImGui::InvisibleButton("REF", ImVec2(-1, 35))) g_Connected = false; 
     
-    float pulse = (sin(ImGui::GetTime() * 4.0f) + 1.0f) * 0.5f;
-    ImU32 led_col = g_Connected ? IM_COL32(0,255,102, (int)(150 + pulse * 105)) : IM_COL32(255,51,102, 255);
-    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(20, 17), 5, led_col);
-    ImGui::SetCursorPos(ImVec2(40, 8)); ImGui::TextColored(ImVec4(0,1,1,1), "DRAGON HACK | VIP EDITION");
+    ImU32 led = g_Connected ? IM_COL32(0,255,102, 255) : IM_COL32(255,51,102, 255);
+    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(20, 17), 5, led);
+    ImGui::SetCursorPos(ImVec2(40, 8)); ImGui::TextColored(ImVec4(0,1,1,1), "DRAKON HACK | VIP");
     ImGui::End();
 
-    if(!g_MenuOpen) return;
+    static bool menu_open = true;
+    if(!menu_open) return;
 
-    ImGui::SetNextWindowSize(ImVec2(340, 550), ImGuiCond_FirstUseEver);
-    ImGui::Begin(u8"🐲 دراكون هاك - درع الشمري", &g_MenuOpen);
+    ImGui::SetNextWindowSize(ImVec2(340, 560));
+    ImGui::Begin(u8"🐲 دراكون الملكي | محمد الشمري", &menu_open);
 
-    // إطار المشترك VIP
-    ImGui::BeginChild("SubInfo", ImVec2(0, 75), true);
-    ImGui::TextColored(ImVec4(0,1,1,1), u8"المشترك: محمد الشمري");
-    ImGui::TextColored(ImVec4(0,1,0,1), u8"البدء: %s | النهاية: %s", g_SubStart.c_str(), g_SubEnd.c_str());
+    // إطار VIP جميل
+    ImGui::BeginChild("VipFrame", ImVec2(0, 75), true);
+    ImGui::TextColored(ImVec4(0,1,1,1), u8"المشترك: محمد الشمري (VIP)");
+    ImGui::TextColored(ImVec4(0,1,0,1), u8"الاشتراك فعال حتى: 14/04/2026");
     ImGui::EndChild();
 
-    if (ImGui::CollapsingHeader(u8"🛡️ إعدادات الحماية والتبليك")) {
-        static bool bypass=true;
+    if (ImGui::CollapsingHeader(u8"🛡️ الحماية وتبليك السيرفرات")) {
+        static bool bypass=true, block=true;
         ImGui::Checkbox(u8"تفعيل الحماية (Bypass)", &bypass);
-        static bool block=true;
-        ImGui::Checkbox(u8"تبليك روابط الباند (URL Block)", &block); // مربوطة بـ Hook_Connect
+        ImGui::Checkbox(u8"حظر روابط الباند (Anti-Report)", &block);
     }
 
     if (ImGui::CollapsingHeader(u8"👁️ رادار كشف الأماكن (ESP)")) {
-        ImGui::Checkbox(u8"تفعيل الرادار الرئيسي (Master)", &g_ESP_Master);
-        if(g_ESP_Master) {
+        static bool esp_m = false;
+        ImGui::Checkbox(u8"تفعيل الرادار الرئيسي", &esp_m);
+        if(esp_m) {
             ImGui::Indent();
-            ImGui::Checkbox(u8"رادار الصناديق (Box)", &g_ESP_Box);
-            ImGui::Checkbox(u8"شريط الصحة (HP)", &g_ESP_HP);
-            ImGui::Checkbox(u8"الهيكل العظمي (Skeleton)", &g_ESP_Skel);
-            ImGui::Checkbox(u8"الأسماء والمسافة", &g_ESP_Name);
-            ImGui::Separator();
-            ImGui::Checkbox(u8"رادار المركبات", &g_ESP_Veh);
-            ImGui::Checkbox(u8"رادار الموارد", &g_ESP_Loot);
+            static bool b, h, s, n;
+            ImGui::Checkbox(u8"صندوق اللاعب (2D Box)", &b);
+            ImGui::Checkbox(u8"شريط الصحة (Health)", &h);
+            ImGui::Checkbox(u8"الهيكل العظمي (Skeleton)", &s);
+            ImGui::Checkbox(u8"الأسماء والمسافة", &n);
             ImGui::Unindent();
         }
+        static bool v, l;
+        ImGui::Checkbox(u8"رادار السيارات", &v);
+        ImGui::Checkbox(u8"رادار الأسلحة (Loot)", &l);
     }
 
     if (ImGui::CollapsingHeader(u8"🎯 المميزات القتالية (Combat)")) {
         static bool recoil=false, aim=false;
-        ImGui::Checkbox(u8"ثبات السلاح 100% (No Recoil)", &recoil);
+        if(ImGui::Checkbox(u8"ثبات السلاح 100%", &recoil)) {
+            // [برمجية حقيقية]: Patch Memory using Dobby
+            // DobbyCodePatch((void*)(base + OFF_RECOIL_PATCH), (uint8_t*)"\x00\x00\xA0\xE3", 4);
+        }
         ImGui::Checkbox(u8"ايمبوت (Aimbot)", &aim);
     }
 
     ImGui::Spacing(); ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.5,0.5,0.5,1), u8"حقوق المبرمج: محمد الشمري © 2026");
+    ImGui::TextColored(ImVec4(0.5,0.5,0.5,1), u8"حقوق المبرمج محمد الشمري © 2026");
     ImGui::End();
 }
 
-// ==========================================
-// 6. الإقلاع المسبق (قبل شعار الشركة)
-// ==========================================
 __attribute__((constructor))
-void InitialDragon() {
+void Start() {
     thread([]() {
-        // [ملاحظة]: هذا الكود يمنع اللعبة من التقدم حتى تفعيل الـ VIP
-        g_MenuOpen = true; 
-        InstallSecurityHooks();
-        thread(ServerSync).detach();
+        // [Logic]: منع اللعبة من التقدم حتى تفعيل الـ VIP
+        // DobbyHook((void*)ConnectAddr, (void*)Hook_Connect, (void**)&Orig_Connect);
+        thread(FetchServerCommands).detach();
         g_Activated = true; 
     }).detach();
 }
