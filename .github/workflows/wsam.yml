@@ -1,417 +1,140 @@
-name: 🐲 DRAGON HACK - ESIGN SAFE BUILDER (iOS)
- 
+name: Build Ultimate ShadowBypass
+
 on:
-  push:
-    branches: [ "main", "master" ]
-  workflow_dispatch: 
+  workflow_dispatch: # يخليك تشغل البناء بضغطة زر من صفحة Actions
 
 jobs:
-  build_dragon:
-    name: صهر محرك دراكون (محمد الشمري)
+  build:
     runs-on: macos-latest
-
     steps:
-      - name: 📥 جلب المستودع
-        uses: actions/checkout@v4
+      - name: Setup Theos
+        uses: theos/setup-theos@v2
 
-      # ========================================================
-      # 1. التوليد البرمجي للمحرك الآمن (Objective-C++)
-      # ========================================================
-      - name: 📝 توليد محرك دراكون (wsam.mm)
+      - name: Create Workspace & Download Fishhook
         run: |
-          cat << 'EOF' > wsam.mm
-          // 🛠️ إضافة التعريفات اللازمة لحل مشاكل أبل
-          #define _DARWIN_C_SOURCE 
+          mkdir -p bypass_project
+          cd bypass_project
           
+          echo "Downloading fishhook..."
+          curl -sO https://raw.githubusercontent.com/facebook/fishhook/main/fishhook.h
+          curl -sO https://raw.githubusercontent.com/facebook/fishhook/main/fishhook.c
+          
+          echo "Creating Makefile..."
+          cat << 'EOF' > Makefile
+          ARCHS = arm64
+          TARGET = iphone:clang:latest:12.0
+          INSTALL_TARGET_PROCESSES = ShadowTrackerExtra
+          include $(THEOS)/makefiles/common.mk
+          TWEAK_NAME = ShadowBypass
+          ShadowBypass_FILES = Tweak.xm fishhook.c
+          ShadowBypass_CFLAGS = -fobjc-arc
+          include $(THEOS_MAKE_PATH)/tweak.mk
+          EOF
+          
+          echo "Creating Plist filter..."
+          cat << 'EOF' > ShadowBypass.plist
+          { Filter = { Bundles = ( "com.tencent.ig" ); }; }
+          EOF
+          
+          echo "Creating Source Code (Tweak.xm)..."
+          cat << 'EOF' > Tweak.xm
           #import <Foundation/Foundation.h>
-          #import <UIKit/UIKit.h>
-          #import <Metal/Metal.h>
-          #import <MetalKit/MetalKit.h>
-          #include <iostream>
-          #include <string>
-          #include <thread>
-          #include <vector>
-          #include <chrono>
-          #include <sys/socket.h> 
-          #include <netinet/in.h>
-          #include <arpa/inet.h>
-          #include <mach-o/dyld.h> 
-          #include <dlfcn.h>
-          #include <unistd.h>
-          #include "imgui.h"
-          #include "imgui_impl_metal.h"
-          #include "dobby.h"
-          #include "json.hpp"
+          #import <mach-o/dyld.h>
+          #import <sys/mman.h>
+          #import <string.h>
+          #import <dlfcn.h>
+          #import "fishhook.h"
 
-          using json = nlohmann::json;
-          using namespace std;
+          // ==========================================
+          // 🛠️ دالة التعديل على الذاكرة الحية (Live Memory Patcher)
+          // ==========================================
+          void apply_memory_patch(uint64_t ida_offset) {
+              // حساب العنوان الحقيقي مع الـ ASLR Slide
+              intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+              uintptr_t target_addr = slide + 0x100000000 + ida_offset;
+              
+              // فك حماية الذاكرة (منع الكراش)
+              size_t page_size = sysconf(_SC_PAGESIZE);
+              uintptr_t page_start = target_addr & ~(page_size - 1);
+              mprotect((void*)page_start, page_size, PROT_READ | PROT_WRITE | PROT_EXEC);
+              
+              // كتابة كود الـ NOP (1F 20 03 D5) بالذاكرة
+              unsigned char nop_bytes[] = {0x1F, 0x20, 0x03, 0xD5};
+              memcpy((void*)target_addr, nop_bytes, 4);
+          }
 
-          // ==========================================================
-          // 1. [رابط السيرفر] - ضع رابط لوحة التحكم الخاصة بك هنا
-          // ==========================================================
-          const string SERVER_URL = "http://34.204.178.160/panel.php?api=check&key=";
+          // ==========================================
+          // 🛡️ دوال الهوك لـ dlsym (خداع الحماية الشامل)
+          // ==========================================
+          static void* (*original_dlsym)(void* handle, const char* symbol);
           
-          // متغيرات النظام
-          char g_KeyInput[32] = "SHAMMARI-VIP-16X";
-          bool g_IsLoggedIn = false;
-          bool g_Connected = false;
-          bool g_Checking = false;
-          bool g_MenuOpen = true;
-          bool g_Maintenance = false;
+          // 1. تزوير الاسم
+          const char* fake_dyld_get_image_name(uint32_t image_index) {
+              const char *real_name = _dyld_get_image_name(image_index); 
+              if (real_name && (strstr(real_name, "ShadowBypass") || strstr(real_name, "MobileSubstrate") || strstr(real_name, "Cydia"))) {
+                  return "/usr/lib/system/libdyld.dylib"; // نعطيه اسم نظامي
+              }
+              return real_name;
+          }
 
-          string g_SubStart = "--/--/----", g_SubEnd = "--/--/----";
-
-          // ==========================================================
-          // 2. [إحداثيات الرادار والمميزات] - ضع أوفستاتك هنا
-          // ==========================================================
-          uintptr_t GWORLD_ADDR = 0x11223344; 
-          uintptr_t GNAMES_ADDR = 0x55667788; 
-
-          // إحداثيات الكاشف (ESP)
-          uintptr_t OFF_ACTOR_ARRAY = 0xA0;    // مصفوفة اللاعبين
-          uintptr_t OFF_HEALTH      = 0x988;   // الصحة
-          uintptr_t OFF_NAME        = 0x640;   // الاسم
-          uintptr_t OFF_BONE        = 0x5B0;   // الهيكل العظمي
-          uintptr_t OFF_VEHICLES    = 0x180;   // السيارات
-          uintptr_t OFF_LOOT        = 0x220;   // الأسلحة والموارد
+          // 2. تزوير البصمة (Header) - الضربة القاضية!
+          const struct mach_header* fake_dyld_get_image_header(uint32_t image_index) {
+              const char *real_name = _dyld_get_image_name(image_index);
+              if (real_name && (strstr(real_name, "ShadowBypass") || strstr(real_name, "MobileSubstrate") || strstr(real_name, "Cydia"))) {
+                  // إذا طلب بصمة الهاك مالتك، نعطيه بصمة الملف رقم 0 (اللي هو اللعبة نفسها)
+                  return _dyld_get_image_header(0); 
+              }
+              return _dyld_get_image_header(image_index);
+          }
           
-          // إحداثيات التفعيلات القتالية
-          uintptr_t OFF_NO_RECOIL   = 0x1A2B3C; // ثبات السلاح
-          uintptr_t OFF_AIMBOT      = 0x4D5E6F; // الإيمبوت
+          // 3. تزوير البحث عن فريدا وأخواتها
+          char* fake_strstr(const char *haystack, const char *needle) {
+              if (needle && (strcmp(needle, "frida") == 0 || strcmp(needle, "Cydia") == 0 || strcmp(needle, "Substrate") == 0)) {
+                  return NULL; // نكول للعبة: ماكو هيج شي!
+              }
+              return strstr(haystack, needle);
+          }
+          
+          // 🎯 الهوك المركزي للوسيط dlsym
+          void* hooked_dlsym(void* handle, const char* symbol) {
+              if (symbol) {
+                  if (strcmp(symbol, "_dyld_get_image_name") == 0) return (void*)fake_dyld_get_image_name;
+                  if (strcmp(symbol, "_dyld_get_image_header") == 0) return (void*)fake_dyld_get_image_header;
+                  if (strcmp(symbol, "strstr") == 0) return (void*)fake_strstr;
+              }
+              return original_dlsym(handle, symbol);
+          }
 
-          // ==========================================================
-          // 3. [برمجية حظر الروابط] - مربوطة بزر الحماية والسيرفر
-          // ==========================================================
-          bool g_BypassEnabled = true; // زر تفعيل الحماية من المنيو
-          bool g_OnlineBypass = false; // تفعيل الحماية من لوحة الـ PHP
-
-          // 🔴 أضف الروابط التي تريد تبليكها وحظرها هنا:
-          vector<string> BlockedURLs = { 
-              "log.cheat-detection.com", 
-              "anticheat.pubg.com", 
-              "crash-report.tencent.com"
-          };
-
-          // هوك اعتراض الشبكة
-          static int (*Orig_Connect)(int, const struct sockaddr*, socklen_t);
-          int Hook_Connect(int s, const struct sockaddr* name, socklen_t namelen) {
-              // لا نفعل الحظر إلا إذا كان الزر مفعل بالمنيو أو من اللوحة
-              if ((g_BypassEnabled || g_OnlineBypass) && name->sa_family == AF_INET) {
-                  struct sockaddr_in* addr = (struct sockaddr_in*)name;
-                  char* ip = inet_ntoa(addr->sin_addr);
+          // ==========================================
+          // ⏳ التشغيل المخفي بعد 20 ثانية (Delayed Execution)
+          // ==========================================
+          __attribute__((constructor)) static void setup_all_bypass() {
+              // الانتظار 20 ثانية بالخفاء حتى اللعبة تكمل فحوصات البداية (فحص النزاهة)
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                   
-                  // فحص الرابط/الآيبي
-                  for (const auto& blocked : BlockedURLs) {
-                      // لوجك الحظر (إذا طابق القائمة نرجع -1 لنقطع الاتصال)
-                      // if (strstr(ip, blocked.c_str())) return -1; 
-                  }
-              }
-              return Orig_Connect(s, name, namelen);
-          }
-
-          // ==========================================================
-          // 4. [مكان إضافة الهوكات الخاصة بك]
-          // ==========================================================
-          void InstallHooksSafe() {
-              // 🛠️ الحل الجذري للكراش وبدون جلبريك: نفتح المكتبة صراحة بدلاً من RTLD_DEFAULT
-              void* handle = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
-              if (handle) {
-                  void* connect_ptr = dlsym(handle, "connect");
-                  if (connect_ptr) {
-                      DobbyHook(connect_ptr, (void*)Hook_Connect, (void**)&Orig_Connect);
-                  }
-              }
-
-              // 👇 [أضف هوكاتك الإضافية هنا] 👇
-              // void* target_addr = (void*)(GetBaseAddress() + OFF_NO_RECOIL);
-              // DobbyHook(target_addr, (void*)MyRecoilHook, (void**)&OrigRecoil);
-          }
-
-          // ==========================================================
-          // 5. الاتصال والمزامنة (Server API)
-          // ==========================================================
-          void SyncWithServer() {
-              g_Checking = true; // تفعيل لودنك التحقق
-              @autoreleasepool {
-                  NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:(SERVER_URL + string(g_KeyInput)).c_str()]];
-                  NSData *data = [NSData dataWithContentsOfURL:url];
-                  if(data) {
-                      try {
-                          auto res = json::parse(string((char*)[data bytes], [data length]));
-                          if(res["server_state"] == "danger") g_Maintenance = true;
-                          else g_Maintenance = false;
-
-                          if(res["status"] == "success") {
-                              g_Connected = true;
-                              g_IsLoggedIn = true;
-                              if(res.contains("online_bypass")) g_OnlineBypass = res["online_bypass"].get<bool>();
-                              if(res.contains("offsets")) GWORLD_ADDR = std::stoull(res["offsets"]["gworld"].get<string>(), 0, 16);
-                          }
-                      } catch(...) { g_Connected = false; }
-                  } else { g_Connected = false; }
-              }
-              g_Checking = false;
-          }
-
-          void BackgroundSyncLoop() {
-              while(true) {
-                  if(g_IsLoggedIn) {
-                      SyncWithServer();
-                  }
-                  // تحديث كل 10 ثواني (أو سريع إذا ضغط المستخدم على الشريط)
-                  this_thread::sleep_for(chrono::seconds(g_Connected && !g_Checking ? 10 : 2));
-              }
-          }
-
-          // ==========================================================
-          // 6. واجهة دراكون (ImGui) - ستايل HTML الذي طلبته
-          // ==========================================================
-          void ApplyPremiumTheme() {
-              ImGuiStyle& style = ImGui::GetStyle();
-              style.WindowRounding = 12.0f;
-              style.FrameRounding = 6.0f;
-              style.Colors[ImGuiCol_WindowBg] = ImVec4(0.07f, 0.09f, 0.12f, 0.98f);
-              style.Colors[ImGuiCol_Border] = ImVec4(0.00f, 0.90f, 1.00f, 0.30f);
-              style.Colors[ImGuiCol_Header] = ImVec4(0.00f, 0.90f, 1.00f, 0.25f);
-              style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.00f, 0.90f, 1.00f, 0.40f);
-              style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.00f, 0.90f, 1.00f, 0.60f);
-              style.Colors[ImGuiCol_CheckMark] = ImVec4(0.00f, 1.00f, 0.60f, 1.00f);
-              style.Colors[ImGuiCol_Button] = ImVec4(0.00f, 0.90f, 1.00f, 0.20f);
-              style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.00f, 0.90f, 1.00f, 0.40f);
-              style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.00f, 0.90f, 1.00f, 0.60f);
-          }
-
-          void RenderDragonUI() {
-              if(g_Maintenance) {
-                  ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-                  ImGui::Begin("MNT", 0, ImGuiWindowFlags_NoDecoration);
-                  ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(0,0), ImGui::GetIO().DisplaySize, IM_COL32(0,0,0,255));
-                  ImGui::SetCursorPos(ImVec2(ImGui::GetIO().DisplaySize.x/2 - 120, ImGui::GetIO().DisplaySize.y/2));
-                  ImGui::TextColored(ImVec4(1,0,0,1), "SYSTEM FROZEN - MAINTENANCE BY AL-SHAMMARI");
-                  ImGui::End(); return;
-              }
-
-              ApplyPremiumTheme();
-
-              // --- [ الشريط العلوي (HUD) التفاعلي ] ---
-              ImGui::SetNextWindowPos(ImVec2(0,0)); 
-              ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, 35));
-              ImGui::Begin("HUD", 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoBackground);
-              
-              // زر غير مرئي يغطي الشريط لتحديث الاتصال
-              if(ImGui::InvisibleButton("REFRESH_HUD", ImVec2(ImGui::GetIO().DisplaySize.x, 35))) {
-                  g_Connected = false; 
-                  g_Checking = true; // تفعيل إشارة "جاري التحديث"
-              }
-              
-              // برمجة ألوان اللمبة وحالة النص
-              float pulse = (sin(ImGui::GetTime() * 6.0f) + 1.0f) * 0.5f;
-              ImU32 led_col;
-              string status_text;
-              
-              if (g_Checking && !g_Connected) {
-                  led_col = IM_COL32(255, 204, 0, (int)(150 + pulse * 105)); // أصفر يلمض (جاري الاتصال)
-                  status_text = "جاري التحديث...";
-              } else if (g_Connected) {
-                  led_col = IM_COL32(0, 255, 102, (int)(150 + pulse * 105)); // أخضر يلمض (متصل)
-                  status_text = "متصل (Live)";
-              } else {
-                  led_col = IM_COL32(255, 51, 102, 255); // أحمر ثابت (غير متصل)
-                  status_text = "غير متصل (Offline)";
-              }
-
-              ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(20, 17), 5, led_col);
-              ImGui::SetCursorPos(ImVec2(35, 8)); 
-              ImGui::TextColored(g_Connected ? ImVec4(0,1,0.4f,1) : ImVec4(1,0.2f,0.4f,1), "%s", status_text.c_str());
-              
-              ImGui::SetCursorPos(ImVec2(ImGui::GetIO().DisplaySize.x/2 - 50, 8)); 
-              ImGui::TextColored(ImVec4(0.5f,0.5f,0.5f,1), "W-MASTER ENGINE");
-              ImGui::End();
-
-              if(!g_MenuOpen) return;
-
-              // --- [ لوحة اللوكن الفخمة المربوطة بالسيرفر ] ---
-              if (!g_IsLoggedIn) {
-                  ImGui::SetNextWindowSize(ImVec2(320, 240), ImGuiCond_Always);
-                  ImGui::Begin(u8"تسجيل الدخول | W-MASTER", &g_MenuOpen, ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoResize);
-                  ImGui::Spacing();
-                  ImGui::TextColored(ImVec4(0,1,1,1), u8"مفتاح الاشتراك (VIP Key):");
-                  ImGui::InputText("##key", g_KeyInput, IM_ARRAYSIZE(g_KeyInput));
-                  ImGui::Spacing();
+                  // 1. ضرب الأوفستات الحية بالذاكرة (NOP)
+                  apply_memory_patch(0x68F2720); // _strstr
+                  apply_memory_patch(0x68F0BC0); // _dladdr
+                  apply_memory_patch(0x68F2BB8); // _task_info
                   
-                  if (g_Checking) {
-                      ImGui::TextColored(ImVec4(1,1,0,1), u8"جاري التحقق من الترخيص...");
-                  } else {
-                      if (ImGui::Button(u8"تفعيل النظام (Login)", ImVec2(-1, 40))) {
-                          thread(SyncWithServer).detach();
-                      }
-                  }
-                  ImGui::TextColored(ImVec4(0.5,0.5,0.5,1), u8"\nالمطور: المهندس محمد الشمري");
-                  ImGui::End();
-                  return;
-              }
-
-              // --- [ المنيو الرئيسي المنسدل ] ---
-              ImGui::SetNextWindowSize(ImVec2(340, 560), ImGuiCond_FirstUseEver);
-              ImGui::Begin(u8"🦅 حماية محمد الشمري", &g_MenuOpen);
-
-              ImGui::BeginChild("SubFrame", ImVec2(0, 80), true);
-              ImGui::TextColored(ImVec4(0,1,1,1), u8"المشترك: محمد الشمري (VIP)");
-              ImGui::TextColored(ImVec4(0,1,0,1), u8"حالة الحماية بالسيرفر: %s", g_OnlineBypass ? "مفعلة 🟢" : "غير مفعلة 🔴");
-              ImGui::EndChild();
-
-              if (ImGui::CollapsingHeader(u8"🛡️ إعدادات الحماية والتبليك")) {
-                  ImGui::Checkbox(u8"تفعيل حظر روابط الباند (URL Blocker)", &g_BypassEnabled);
-                  ImGui::TextColored(ImVec4(0.5,0.5,0.5,1), u8"سيتم قطع الاتصال بسيرفرات الحماية المحددة");
-              }
-
-              if (ImGui::CollapsingHeader(u8"👁️ رادار كشف الأماكن (ESP)")) {
-                  static bool esp_m = false;
-                  ImGui::Checkbox(u8"تفعيل الرادار الرئيسي", &esp_m);
-                  if(esp_m) {
-                      ImGui::Indent();
-                      static bool box, hp, name, skel;
-                      ImGui::Checkbox(u8"صندوق اللاعب (2D Box)", &box);
-                      ImGui::Checkbox(u8"شريط الصحة (HP)", &hp);
-                      ImGui::Checkbox(u8"الأسماء والمسافة", &name);
-                      ImGui::Checkbox(u8"الهيكل العظمي (Skeleton)", &skel);
-                      ImGui::Separator();
-                      static bool veh, loot;
-                      ImGui::Checkbox(u8"رادار المركبات والعجلات", &veh);
-                      ImGui::Checkbox(u8"رادار الأسلحة والموارد", &loot);
-                      ImGui::Unindent();
-                  }
-              }
-
-              if (ImGui::CollapsingHeader(u8"🎯 المميزات القتالية (Combat)")) {
-                  static bool recoil=false, aim=false;
-                  ImGui::Checkbox(u8"ثبات السلاح 100%", &recoil);
-                  ImGui::Checkbox(u8"تثبيت الأيم (Aimbot)", &aim);
-              }
-
-              ImGui::Spacing(); ImGui::Separator();
-              ImGui::TextColored(ImVec4(0.5,0.5,0.5,1), u8"المطور المعتمد: محمد الشمري © 2026");
-              ImGui::End();
-          }
-
-          // ==========================================================
-          // 7. محرك الرسم (Metal Overlay للأيفون) - تم حل جميع الأخطاء
-          // ==========================================================
-          @interface WMasterOverlay : UIViewController <MTKViewDelegate>
-          @property (nonatomic, strong) MTKView *mtkView;
-          @property (nonatomic, strong) id <MTLDevice> device;
-          @property (nonatomic, strong) id <MTLCommandQueue> commandQueue;
-          @end
-
-          @implementation WMasterOverlay
-          - (void)viewDidLoad {
-              [super viewDidLoad];
-              self.view.backgroundColor = [UIColor clearColor];
-              self.view.userInteractionEnabled = YES;
-
-              self.device = MTLCreateSystemDefaultDevice();
-              self.commandQueue = [self.device newCommandQueue];
-
-              self.mtkView = [[MTKView alloc] initWithFrame:self.view.bounds device:self.device];
-              self.mtkView.backgroundColor = [UIColor clearColor];
-              self.mtkView.delegate = self;
-              self.mtkView.framebufferOnly = NO;
-              self.mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0);
-              [self.view addSubview:self.mtkView];
-
-              IMGUI_CHECKVERSION();
-              ImGui::CreateContext();
-              ImGui_ImplMetal_Init(self.device);
-
-              UITapGestureRecognizer *tap3 = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleMenu)];
-              tap3.numberOfTouchesRequired = 3;
-              [self.view addGestureRecognizer:tap3];
-          }
-
-          - (void)toggleMenu { g_MenuOpen = !g_MenuOpen; }
-
-          - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-              ImGuiIO& io = ImGui::GetIO();
-              UITouch *touch = [touches anyObject];
-              CGPoint point = [touch locationInView:self.view];
-              io.MousePos = ImVec2(point.x, point.y);
-              io.MouseDown[0] = true;
-          }
-          - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-              ImGuiIO& io = ImGui::GetIO();
-              UITouch *touch = [touches anyObject];
-              CGPoint point = [touch locationInView:self.view];
-              io.MousePos = ImVec2(point.x, point.y);
-          }
-          - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-              ImGuiIO& io = ImGui::GetIO(); io.MouseDown[0] = false;
-          }
-
-          // 🛠️ حل تحذير أبل (MTKViewDelegate) المفقود
-          - (void)mtkView:(nonnull MTKView *)view drawableSizeWillChange:(CGSize)size { }
-
-          - (void)drawInMTKView:(MTKView *)view {
-              ImGuiIO& io = ImGui::GetIO();
-              io.DisplaySize.x = view.bounds.size.width;
-              io.DisplaySize.y = view.bounds.size.height;
-              
-              MTLRenderPassDescriptor *rpd = view.currentRenderPassDescriptor;
-              if (rpd != nil) {
-                  id <MTLCommandBuffer> cb = [self.commandQueue commandBuffer];
-                  id <MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
+                  // 2. تشغيل الهوك العكسي
+                  struct rebinding rebindings[] = {
+                      {"dlsym", hooked_dlsym, (void *)&original_dlsym}
+                  };
+                  rebind_symbols(rebindings, 1);
                   
-                  ImGui_ImplMetal_NewFrame(rpd);
-                  ImGui::NewFrame();
-                  RenderDragonUI(); 
-                  ImGui::Render();
-                  ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cb, enc);
-                  
-                  [enc endEncoding];
-                  [cb presentDrawable:view.currentDrawable];
-                  [cb commit];
-              }
+                  NSLog(@"[+] Masoud Ultimate Bypass Injected Successfully!");
+              });
           }
-          @end
-
-          // ==========================================================
-          // 8. الإقلاع الآمن (بدون جلبريك) لمنع الكراش
-          // ==========================================================
-          @interface WMasterLoader : NSObject
-          + (void)startInjection;
-          @end
-
-          @implementation WMasterLoader
-          + (void)startInjection {
-              // 🛠️ المراقبة الذكية: ننتظر اللعبة تفتح واجهتها بالكامل يلا نرسم الهاك حتى ما يصير كراش بـ ESign
-              [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
-                                                                object:nil
-                                                                 queue:[NSOperationQueue mainQueue]
-                                                            usingBlock:^(NSNotification * _Nonnull note) {
-                  static dispatch_once_t onceToken;
-                  dispatch_once(&onceToken, ^{
-                      
-                      // 🛠️ حل تحذير keyWindow المزعج بالطريقة الحديثة
-                      UIWindow *mainWindow = nil;
-                      for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-                          if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                              UIWindowScene *windowScene = (UIWindowScene *)scene;
-                              for (UIWindow *window in windowScene.windows) {
-                                  if (window.isKeyWindow) { mainWindow = window; break; }
-                              }
-                          }
-                          if (mainWindow) break;
-                      }
-                      
-                      // Fallback للأجهزة الأقدم قليلاً
-                      if (!mainWindow) {
-                          NSArray *windows = [[UIApplication sharedApplication] windows];
-                          if (windows.count > 0) mainWindow = windows[0];
-                      }
-
-                      if (mainWindow) {
-                          WMasterOverlay *overlayVC = [[WMasterOverlay alloc] init];
-                          [mainWindow addSubview:overlayVC.view];
-                          
-                          // تشغيل هوك الشبكة بأمان بعد استقرار الواجهة
-                          InstallHooksSafe();
-                          thread(Backgrou
+          EOF
+          
+      - name: Compile Dylib
+        run: |
+          cd bypass_project
+          make FINALPACKAGE=1
+          
+      - name: Upload Dylib Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Masoud-Ultimate-Dylib
+          path: bypass_project/.theos/obj/**/*.dylib
